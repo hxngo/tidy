@@ -1,0 +1,35 @@
+{
+  "name": "tidy",
+  "version": "0.1.0",
+  "description": "이메일/슬랙 메시지 자동 분류·요약·태스크화 데스크탑 앱",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "electron:dev": "node scripts/patch-electron-name.js && concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "build": "vite build",
+    "dist": "npm run build && electron-builder"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.27.0",
+    "@slack/web-api": "^7.3.0",
+    "@xenova/transformers": "^2.17.2",
+    "better-sqlite3": "^11.1.2",
+    "bplist-parser": "^0.3.2",
+    "electron-store": "^8.2.0",
+    "imapflow": "^1.0.162",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.25.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.19",
+    "concurrently": "^8.2.2",
+    "electron": "^31.3.1",
+    "electron-builder": "^24.13.3",
+    "postcss": "^8.4.39",
+    "tailwindcss": "^3.4.7",
+    "vite": "^5.3.4",
+    "wait-on": "^7.2.0"
+  }
+}

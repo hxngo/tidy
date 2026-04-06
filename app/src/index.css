@@ -1,0 +1,142 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  box-sizing: border-box;
+}
+
+/* ── 다크 테마 (기본) ─────────────────────────────── */
+:root {
+  --bg-base:      #09090c;
+  --bg-surface:   #0f1018;
+  --bg-header:    #09090c;
+  --border:       #13141c;
+  --text-1:       #e2e2ea;
+  --text-2:       #9a9cb8;
+  --accent:       #d4d4d8;
+  --scrollbar:    #1e2030;
+  --scrollbar-hover: #2d304a;
+  --card-bg:      linear-gradient(160deg, #0f1018 0%, #0b0d14 100%);
+  --card-bg-overdue: linear-gradient(160deg, #130d0d 0%, #0f0b0b 100%);
+  --card-border:  #1a1c28;
+  --card-divide:  #14151e;
+}
+
+/* ── 라이트 테마 ──────────────────────────────────── */
+[data-theme="light"] {
+  --bg-base:      #f2f2f7;
+  --bg-surface:   #ffffff;
+  --bg-header:    #f7f7fa;
+  --border:       #e0e0e5;
+  --text-1:       #1c1c1e;
+  --text-2:       #636366;
+  --accent:       #3c3c43;
+  --scrollbar:    #c7c7cc;
+  --scrollbar-hover: #aeaeb2;
+  --card-bg:      linear-gradient(160deg, #ffffff 0%, #f7f7fa 100%);
+  --card-bg-overdue: linear-gradient(160deg, #fff5f5 0%, #fef2f2 100%);
+  --card-border:  #e0e0e5;
+  --card-divide:  #eeeef2;
+}
+
+/* ── 라이트 모드 Tailwind 클래스 재정의 ──────────── */
+
+/* 배경 */
+[data-theme="light"] .bg-\[#09090c\]  { background-color: #f7f7fa !important; }
+[data-theme="light"] .bg-\[#0f1018\]  { background-color: #ffffff !important; }
+[data-theme="light"] .bg-\[#0b0d14\]  { background-color: #f5f5f8 !important; }
+[data-theme="light"] .bg-\[#0f0f0f\]  { background-color: #f5f5f8 !important; }
+[data-theme="light"] .bg-\[#0d0e15\]  { background-color: #f0f0f4 !important; }
+[data-theme="light"] .bg-\[#0d0d0d\]  { background-color: #ffffff !important; }
+[data-theme="light"] .bg-\[#1a1a1a\]  { background-color: #f0f0f4 !important; }
+[data-theme="light"] .bg-\[#14151e\]  { background-color: #ededf1 !important; }
+[data-theme="light"] .bg-\[#1a1c28\]  { background-color: #e8e8ed !important; }
+[data-theme="light"] .bg-\[#1c1c22\]  { background-color: #ededf1 !important; }
+[data-theme="light"] .bg-\[#131420\]  { background-color: #f0f0f3 !important; }
+
+/* 텍스트 — 밝은 색 → 어두운 색으로 */
+[data-theme="light"] .text-\[#e2e2ea\]  { color: #1c1c1e !important; }
+[data-theme="light"] .text-\[#e5e5e5\]  { color: #1c1c1e !important; }
+[data-theme="light"] .text-\[#e8e8f2\]  { color: #1c1c1e !important; }
+[data-theme="light"] .text-\[#d8d8e8\]  { color: #1c1c1e !important; }
+[data-theme="light"] .text-\[#d0d0e4\]  { color: #2c2c2e !important; }
+[data-theme="light"] .text-\[#c8c8d0\]  { color: #3c3c43 !important; }
+[data-theme="light"] .text-\[#b8bacc\]  { color: #3c3c43 !important; }
+[data-theme="light"] .text-\[#b0b0c4\]  { color: #48484e !important; }
+[data-theme="light"] .text-\[#a8a8b4\]  { color: #58585e !important; }
+[data-theme="light"] .text-\[#9a9cb8\]  { color: #48484e !important; }
+[data-theme="light"] .text-\[#9a9cc0\]  { color: #48484e !important; }
+[data-theme="light"] .text-\[#8a8ca8\]  { color: #58585e !important; }
+[data-theme="light"] .text-\[#737373\]  { color: #636366 !important; }
+[data-theme="light"] .text-\[#d4d4d8\]  { color: #3c3c43 !important; }
+
+/* 텍스트 — 거의 안 보이던 어두운 색 → 가시성 있게 */
+[data-theme="light"] .text-\[#6b6e8c\]  { color: #707074 !important; }
+[data-theme="light"] .text-\[#5a5c78\]  { color: #80808a !important; }
+[data-theme="light"] .text-\[#505272\]  { color: #88888e !important; }
+[data-theme="light"] .text-\[#404060\]  { color: #909096 !important; }
+[data-theme="light"] .text-\[#35374e\]  { color: #909096 !important; }
+[data-theme="light"] .text-\[#3d3f52\]  { color: #90909a !important; }
+[data-theme="light"] .text-\[#4a4c68\]  { color: #888890 !important; }
+[data-theme="light"] .text-\[#252838\]  { color: #a0a0a8 !important; }
+
+/* 보더 */
+[data-theme="light"] .border-\[#1a1c28\]  { border-color: #e0e0e5 !important; }
+[data-theme="light"] .border-\[#13141c\]  { border-color: #eaeaee !important; }
+[data-theme="light"] .border-\[#14151e\]  { border-color: #e8e8ec !important; }
+[data-theme="light"] .border-\[#2a2a2a\]  { border-color: #d8d8dd !important; }
+[data-theme="light"] .border-\[#2a2c40\]  { border-color: #d5d5da !important; }
+[data-theme="light"] .border-\[#252840\]  { border-color: #d0d0d5 !important; }
+[data-theme="light"] .border-\[#1c1e2a\]  { border-color: #e0e0e6 !important; }
+[data-theme="light"] .divide-\[#14151e\] > :not([hidden]) ~ :not([hidden]) {
+  border-color: #eaeaee !important;
+}
+
+/* 플레이스홀더 */
+[data-theme="light"] .placeholder-\[#404040\]::placeholder { color: #b0b0b5 !important; }
+[data-theme="light"] .placeholder-\[#2e3048\]::placeholder { color: #b8b8bd !important; }
+
+/* 인풋 배경 */
+[data-theme="light"] .bg-\[#1a1a1a\]  { background-color: #f8f8fb !important; }
+[data-theme="light"] .bg-\[#0f1018\]  { background-color: #ffffff !important; }
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--bg-base);
+  color: var(--text-1);
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+}
+
+/* 얇고 세련된 스크롤바 */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); }
+
+/* Electron 드래그 영역 */
+.drag-region { -webkit-app-region: drag; }
+.no-drag { -webkit-app-region: no-drag; }
+
+/* 애니메이션 */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-in { animation: fadeIn 0.18s ease-out; }
+
+@keyframes fadeSlide {
+  from { opacity: 0; transform: translateX(-6px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.fade-slide { animation: fadeSlide 0.2s ease-out; }
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+.animate-pulse-dot { animation: pulse-dot 1.5s ease-in-out infinite; }

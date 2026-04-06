@@ -1,0 +1,23 @@
+# Node
+app/node_modules/
+node_modules/
+
+# Build outputs
+app/dist/
+app/release/
+
+# Electron store / logs
+app/*.db
+app/*.db-shm
+app/*.db-wal
+
+# OS
+.DS_Store
+*.DS_Store
+
+# Env / secrets
+.env
+.env.*
+
+# Debug logs
+notif-debug.log
