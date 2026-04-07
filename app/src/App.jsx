@@ -34,6 +34,7 @@ import Inbox from './pages/Inbox.jsx'
 import Tasks from './pages/Tasks.jsx'
 import People from './pages/People.jsx'
 import Settings from './pages/Settings.jsx'
+import Calendar from './pages/Calendar.jsx'
 
 function MainLayout() {
   const [syncStatus, setSyncStatus] = useState({})
@@ -116,6 +117,7 @@ function MainLayout() {
           <Route path="/inbox" element={<Inbox highlightItemId={highlightItemId} onHighlightConsumed={() => setHighlightItemId(null)} />} />
           <Route path="/tasks" element={<Tasks />} />
           <Route path="/people" element={<People />} />
+          <Route path="/calendar" element={<Calendar />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </div>

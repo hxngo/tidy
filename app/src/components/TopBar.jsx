@@ -87,12 +87,22 @@ const Ic = {
       <path d="M10 10l4 4"/>
     </svg>
   ),
+  calendar: (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="1.5" y="2.5" width="13" height="12" rx="1.5"/>
+      <path d="M1.5 6.5h13"/>
+      <path d="M5 1.5v2M11 1.5v2"/>
+      <path d="M4.5 9.5h1M7.5 9.5h1M10.5 9.5h1"/>
+      <path d="M4.5 12h1M7.5 12h1M10.5 12h1"/>
+    </svg>
+  ),
 }
 
 const NAV_ITEMS = [
   { to: '/inbox', label: '인박스', icon: 'inbox' },
   { to: '/tasks', label: '태스크', icon: 'tasks' },
   { to: '/people', label: '인물', icon: 'people' },
+  { to: '/calendar', label: '캘린더', icon: 'calendar' },
 ]
 
 export default function TopBar({ syncStatus = {}, newCount = 0, onNavigateToItem }) {
