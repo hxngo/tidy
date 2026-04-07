@@ -9,6 +9,7 @@ const { EventEmitter } = require('events')
 
 const SUPPORTED_EXTS = new Set([
   '.txt', '.pdf', '.docx', '.eml', '.md', '.vtt',
+  '.hwp', '.hwpx',
   '.jpg', '.jpeg', '.png', '.gif', '.webp', '.heic',
 ])
 

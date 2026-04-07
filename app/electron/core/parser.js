@@ -25,6 +25,9 @@ async function extractText(filePath) {
       return extractFromDocx(filePath)
     case '.eml':
       return extractFromEml(filePath)
+    case '.hwp':
+    case '.hwpx':
+      return extractFromHwp(filePath)
     default:
       throw new Error(`지원하지 않는 파일 형식: ${ext || '(없음)'}`)
   }
@@ -234,6 +237,40 @@ async function extractFromDocx(filePath) {
   }
 }
 
+// HWP / HWPX 파일 텍스트 추출 (hwp.js 사용)
+async function extractFromHwp(filePath) {
+  try {
+    const { parse } = require('hwp.js')
+    const buffer = fs.readFileSync(filePath)
+    const doc = parse(buffer.toString('binary'))
+
+    const lines = []
+    for (const section of doc.sections || []) {
+      for (const para of section.paragraphs || []) {
+        let line = ''
+        const chars = para.chars?.items ?? para.chars ?? []
+        for (const ch of chars) {
+          if (typeof ch.value === 'string') {
+            line += ch.value
+          } else if (ch.value === 13) {
+            line += '\n'
+          }
+        }
+        const trimmed = line.trim()
+        if (trimmed) lines.push(trimmed)
+      }
+    }
+
+    const text = lines.join('\n').trim()
+    return (`[HWP 문서: ${path.basename(filePath)}]\n\n` + (text || '(내용 없음)')).slice(0, 5000)
+  } catch (error) {
+    if (error.code === 'MODULE_NOT_FOUND') {
+      return `[HWP 파싱 불가] hwp.js 모듈이 필요합니다: ${path.basename(filePath)}`
+    }
+    return `[HWP 파일: ${path.basename(filePath)}] 파싱 오류: ${error.message}`
+  }
+}
+
 function extractFromEml(filePath) {
   const content = fs.readFileSync(filePath, 'utf-8')
 
@@ -261,6 +298,9 @@ function inferSource(filePath, content = '') {
   const ext = path.extname(filePath).toLowerCase()
   const name = path.basename(filePath).toLowerCase()
 
+  if (ext === '.hwp' || ext === '.hwpx') {
+    return 'hwp'
+  }
   if (ext === '.eml' || name.includes('mail') || name.includes('email')) {
     return 'gmail'
   }

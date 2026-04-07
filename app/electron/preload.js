@@ -160,5 +160,17 @@ contextBridge.exposeInMainWorld('tidy', {
     run: (params) => ipcRenderer.invoke('skill:run', params),
     getOutputs: () => ipcRenderer.invoke('skill:outputs:get'),
     deleteOutput: (id) => ipcRenderer.invoke('skill:outputs:delete', { id }),
+    openInApp: (params) => ipcRenderer.invoke('skill:open-in-app', params),
+    openHwpFile: (filePath) => ipcRenderer.invoke('skill:open-hwp-file', { filePath }),
+  },
+
+  // NotebookLM 스킬
+  nlm: {
+    checkSetup: () => ipcRenderer.invoke('nlm:check-setup'),
+    install: () => ipcRenderer.invoke('nlm:install'),
+    login: () => ipcRenderer.invoke('nlm:login'),
+    runSkill: (params) => ipcRenderer.invoke('nlm:run-skill', params),
+    onProgress: (cb) => makeListener('nlm:progress', cb),
+    onInstallProgress: (cb) => makeListener('nlm:install-progress', cb),
   },
 })

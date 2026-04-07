@@ -16,6 +16,7 @@
     "better-sqlite3": "^11.1.2",
     "bplist-parser": "^0.3.2",
     "electron-store": "^8.2.0",
+    "hwp.js": "^0.0.3",
     "imapflow": "^1.0.162",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

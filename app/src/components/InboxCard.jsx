@@ -9,6 +9,13 @@ const QUICK_SKILLS = [
   { id: 'report',    label: '보고서', color: '#3b82f6' },
 ]
 
+// skill_hint → 버튼 정보
+const SKILL_HINT_BTN = {
+  hwp:     { label: 'HWP 공문서',  color: '#64748b', icon: '文' },
+  minutes: { label: '회의록',      color: '#8b5cf6', icon: '◉' },
+  summary: { label: '요약',        color: '#6366f1', icon: '✦' },
+}
+
 // ─── Category system ─────────────────────────────────────────────────────────
 
 export const CATEGORY_DESC = {
@@ -263,6 +270,44 @@ export default function InboxCard({ item, sourceConfig, onMarkDone, onRestore, o
                 onClick={(e) => { e.stopPropagation(); setActionsExpanded(v => !v) }}
               >
                 {actionsExpanded ? '접기 ▴' : `+${actionItems.length - 2}개 더 ▾`}
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* ── Skill hint (파일 타입 자동 감지) ── */}
+        {!isDone && item.skill_hint && SKILL_HINT_BTN[item.skill_hint] && (
+          <div className="flex items-center gap-2 mb-2.5">
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                setSkillPanel({ open: true, skillId: item.skill_hint })
+              }}
+              className="flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-lg border transition-colors font-medium"
+              style={{
+                color: SKILL_HINT_BTN[item.skill_hint].color,
+                background: SKILL_HINT_BTN[item.skill_hint].color + '18',
+                borderColor: SKILL_HINT_BTN[item.skill_hint].color + '40',
+              }}
+            >
+              <span>{SKILL_HINT_BTN[item.skill_hint].icon}</span>
+              <span>{SKILL_HINT_BTN[item.skill_hint].label}</span>
+            </button>
+
+            {/* HWP 원본 파일 열기 */}
+            {item.skill_hint === 'hwp' && item.original_file_path && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  window.tidy?.skills.openHwpFile(item.original_file_path)
+                }}
+                className="flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-lg border border-[#1c1e2c] hover:border-[#2a2c40] text-[#7a7c98] bg-[#14151e] transition-colors"
+              >
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M7 2H3a1 1 0 00-1 1v10a1 1 0 001 1h10a1 1 0 001-1V9"/>
+                  <path d="M10 1h5v5M15 1L8 8"/>
+                </svg>
+                한글에서 열기
               </button>
             )}
           </div>

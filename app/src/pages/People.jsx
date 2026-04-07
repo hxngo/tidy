@@ -126,12 +126,14 @@ export default function People() {
     setConfirmDelete(null)
   }
 
-  const filtered = people.filter(
-    (p) =>
-      matchesSearch(p.name, search) ||
-      matchesSearch(p.email, search) ||
-      matchesSearch(p.org, search)
-  )
+  const filtered = search.trim()
+    ? people.filter(
+        (p) =>
+          matchesSearch(p.name, search) ||
+          matchesSearch(p.email, search) ||
+          matchesSearch(p.org, search)
+      )
+    : people
 
   return (
     <div className="h-full flex flex-col">

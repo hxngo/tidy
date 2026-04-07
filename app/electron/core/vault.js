@@ -146,7 +146,12 @@ function buildItemBody(item, people, actionItems) {
   const peopleLinks = people.map(p => `[[${p}]]`).join(', ')
   const projectLink = item.project_id ? `[[projects/${item.project_id}]]` : ''
   const actionLines = actionItems.length > 0
-    ? actionItems.map(a => `- [ ] ${a}`).join('\n')
+    ? actionItems.map(a => {
+        const text = typeof a === 'object' ? (a.text || '') : String(a)
+        const due = typeof a === 'object' && a.due_date && a.due_date !== 'null'
+          ? ` (기한: ${a.due_date})` : ''
+        return `- [ ] ${text}${due}`
+      }).join('\n')
     : '(없음)'
   const sourceLabel = item.source ? ` \`${item.source}\`` : ''
 

@@ -232,7 +232,7 @@ function invalidateContextCache() { _ctxCache = null }
 // opts.forceCalendar: true이면 calendarEnabled 설정 무관하게 캘린더 이벤트 생성
 // opts.isRetry: true이면 retry 큐에서 호출된 것 (dedup 건너뜀)
 async function processIncomingMessage(rawText, source, win, opts = {}) {
-  const { preAnalyzed, forceCalendar = false, isRetry = false, bundleId, notifSender } = opts
+  const { preAnalyzed, forceCalendar = false, isRetry = false, bundleId, notifSender, skillHint, originalFilePath } = opts
 
   // 중복 방지 (retry는 이미 등록된 항목이므로 건너뜀)
   if (!isRetry && !preAnalyzed && isAlreadyProcessed(rawText, source)) {
@@ -439,6 +439,8 @@ async function processIncomingMessage(rawText, source, win, opts = {}) {
       ...savedItem,
       people: resolvedPeople,
       action_items: analysis.action_items || [],
+      skill_hint: skillHint || null,
+      original_file_path: originalFilePath || null,
     })
   }
 
@@ -1412,7 +1414,7 @@ function setupIpcHandlers(ipcMain, getWindow) {
       const { runSkill } = require('./core/ai')
       const SKILL_LABELS = {
         summary: '요약', translate: '번역', minutes: '회의록', report: '보고서',
-        kpi: 'KPI 현황', slides: '슬라이드', budget: '예산표', notebook: '노트', onboarding: '온보딩',
+        kpi: 'KPI 현황', slides: '슬라이드', budget: '예산표', notebook: '노트', onboarding: '온보딩', hwp: '공문서(HWP)',
       }
       const output = await runSkill(skillId, input)
       const skillLabel = SKILL_LABELS[skillId] || skillId
@@ -1438,6 +1440,126 @@ function setupIpcHandlers(ipcMain, getWindow) {
     }
   })
 
+  // ─── 스킬 출력 → 파일 저장 & 앱 실행 ────────────────────────
+  ipcMain.handle('skill:open-in-app', async (_event, { skillId, content, fileName }) => {
+    try {
+      const os = require('os')
+      const { exec } = require('child_process')
+
+      // 스킬별 앱 및 확장자 설정
+      const SKILL_APP_MAP = {
+        hwp:        { app: 'Hancom Office HWP', ext: 'txt' },
+        report:     { app: 'Pages',             ext: 'txt' },
+        minutes:    { app: 'Pages',             ext: 'txt' },
+        onboarding: { app: 'Pages',             ext: 'txt' },
+        slides:     { app: 'Keynote',           ext: 'txt' },
+        budget:     { app: 'Numbers',           ext: 'csv' },
+        kpi:        { app: 'Numbers',           ext: 'csv' },
+        notebook:   { app: 'Obsidian',          ext: 'md'  },
+        summary:    { app: 'TextEdit',          ext: 'txt' },
+        translate:  { app: 'TextEdit',          ext: 'txt' },
+      }
+
+      const cfg = SKILL_APP_MAP[skillId] || { app: 'TextEdit', ext: 'txt' }
+      const safeName = (fileName || `tidy-${skillId}`).replace(/[^a-zA-Z0-9가-힣_\-]/g, '_')
+      const tmpPath = path.join(os.tmpdir(), `${safeName}.${cfg.ext}`)
+
+      // CSV 스킬(예산표·KPI)은 마크다운 표 → 진짜 CSV 변환
+      const fileContent = cfg.ext === 'csv' ? markdownTableToCsv(content) : content
+      fs.writeFileSync(tmpPath, fileContent, 'utf-8')
+
+      // 앱이 설치된 경우 해당 앱으로, 없으면 기본 앱으로 열기
+      const cmd = `open -a "${cfg.app}" "${tmpPath}" 2>/dev/null || open "${tmpPath}"`
+      exec(cmd)
+
+      return { success: true, filePath: tmpPath, app: cfg.app }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // ─── HWP 파일 직접 열기 ─────────────────────────────────────
+  ipcMain.handle('skill:open-hwp-file', async (_event, { filePath: hwpPath }) => {
+    try {
+      const { exec } = require('child_process')
+      exec(`open -a "Hancom Office HWP" "${hwpPath}" 2>/dev/null || open "${hwpPath}"`)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // ─── NotebookLM 스킬 ─────────────────────────────────────────
+  const nlm = require('./core/notebooklm')
+
+  // 설치/로그인 상태 확인
+  ipcMain.handle('nlm:check-setup', async () => {
+    return nlm.checkSetup()
+  })
+
+  // pip install notebooklm-py[browser] + playwright chromium
+  ipcMain.handle('nlm:install', async (event) => {
+    const python = nlm.findPython()
+    if (!python) return { success: false, error: 'Python 3.10+을 찾을 수 없습니다.' }
+
+    event.sender.send('nlm:install-progress', { message: 'notebooklm-py 설치 중...\n' })
+    const r1 = await nlm.install(python, (msg) => {
+      event.sender.send('nlm:install-progress', { message: msg })
+    })
+    if (!r1.success) return { success: false, error: 'pip install 실패' }
+
+    event.sender.send('nlm:install-progress', { message: '\nPlaywright Chromium 설치 중...\n' })
+    const r2 = await nlm.installPlaywright(python, (msg) => {
+      event.sender.send('nlm:install-progress', { message: msg })
+    })
+
+    return { success: r2.success }
+  })
+
+  // 브라우저 로그인 (Terminal 창 열기)
+  ipcMain.handle('nlm:login', async () => {
+    try {
+      nlm.openLogin()
+      return { success: true }
+    } catch (e) {
+      return { success: false, error: e.message }
+    }
+  })
+
+  // 스킬 실행 → 파일 생성 → 앱으로 열기
+  ipcMain.handle('nlm:run-skill', async (event, { skillId, content, title }) => {
+    const NLM_APP_MAP = {
+      pptx: 'Keynote',
+      mp3:  'QuickTime Player',
+      mp4:  'QuickTime Player',
+      png:  'Preview',
+      md:   'TextEdit',
+      csv:  'Numbers',
+      json: 'TextEdit',
+    }
+
+    try {
+      const result = await nlm.runSkill(skillId, content, {
+        title: title || 'Tidy Input',
+        language: 'ko',
+        onProgress: (msg) => event.sender.send('nlm:progress', msg),
+      })
+
+      // 생성된 파일을 네이티브 앱으로 열기
+      const { exec } = require('child_process')
+      const appName = NLM_APP_MAP[result.ext] || 'Finder'
+      exec(`open -a "${appName}" "${result.path}" 2>/dev/null || open "${result.path}"`)
+
+      return { success: true, path: result.path, ext: result.ext, label: result.label, app: appName }
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message,
+        setupStep: error.setupStep || null,
+      }
+    }
+  })
+
 }
 
 // 파일 업로드 처리 공통 함수 (IPC + WatchFolder 모두 사용)
@@ -1455,7 +1577,24 @@ async function processFileUpload(filePath, win) {
   } else {
     const rawText = await extractText(filePath)
     const source = inferSource(filePath, rawText)
-    return processIncomingMessage(rawText, source, win, { forceCalendar: true })
+    const ext = path.extname(filePath).toLowerCase()
+
+    // 파일 타입별 자동 스킬 힌트
+    const SKILL_HINT_MAP = {
+      '.hwp':  'hwp',
+      '.hwpx': 'hwp',
+      '.vtt':  'minutes',
+      '.pdf':  'summary',
+      '.docx': 'summary',
+    }
+    const skillHint = SKILL_HINT_MAP[ext] || null
+    const originalFilePath = ['.hwp', '.hwpx'].includes(ext) ? filePath : null
+
+    return processIncomingMessage(rawText, source, win, {
+      forceCalendar: true,
+      skillHint,
+      originalFilePath,
+    })
   }
 }
 
@@ -1465,6 +1604,44 @@ function safeJsonParse(str, fallback) {
   } catch {
     return fallback
   }
+}
+
+/**
+ * 마크다운 표 → CSV 변환
+ * "| 항목 | 금액 |" 형태의 마크다운을 진짜 CSV로 변환.
+ * 표가 없으면 원본 텍스트 반환.
+ */
+function markdownTableToCsv(content) {
+  const lines = content.split('\n')
+  const csvRows = []
+  let hasTable = false
+
+  for (const line of lines) {
+    const trimmed = line.trim()
+    // 구분선 (|---|---|) 은 건너뜀
+    if (/^\|[\s\-:|]+\|/.test(trimmed)) continue
+
+    if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
+      hasTable = true
+      // | 셀1 | 셀2 | → ['셀1', '셀2']
+      const cells = trimmed
+        .slice(1, -1)          // 앞뒤 | 제거
+        .split('|')
+        .map(c => c.trim())
+
+      // 쉼표·줄바꿈 포함 셀은 큰따옴표로 감쌈
+      const csvLine = cells
+        .map(c => (c.includes(',') || c.includes('"') || c.includes('\n'))
+          ? `"${c.replace(/"/g, '""')}"` : c)
+        .join(',')
+      csvRows.push(csvLine)
+    } else if (trimmed && hasTable) {
+      // 표 밖 텍스트(제목·설명 등)는 첫 번째 컬럼에 그대로
+      csvRows.push(`"${trimmed.replace(/"/g, '""')}"`)
+    }
+  }
+
+  return hasTable ? csvRows.join('\n') : content
 }
 
 module.exports = { setupIpcHandlers, processIncomingMessage, processFileUpload }
