@@ -969,6 +969,54 @@ function buildIndex() {
   }
 }
 
+// ─── 스킬 출력물 ────────────────────────────────────────────────
+function saveSkillOutput({ skillId, skillLabel, input, output, sourceItemId }) {
+  const id = randomUUID()
+  const now = new Date().toISOString()
+  const safeDate = now.slice(0, 10)
+  const fileName = `${safeDate}-${skillId}-${id.slice(0, 8)}.md`
+  const dir = path.join(getVaultPath(), 'Skills', 'Outputs')
+  ensureDir(dir)
+
+  const meta = {
+    id,
+    skill_id: skillId,
+    skill_label: skillLabel,
+    source_item_id: sourceItemId || null,
+    created_at: now,
+  }
+  const preview = input.length > 200 ? input.slice(0, 200) + '…' : input
+  const body = `# ${skillLabel} 출력물\n\n> **원본:** ${preview}\n\n---\n\n${output}\n`
+  fs.writeFileSync(path.join(dir, fileName), serializeFrontmatter(meta, body), 'utf-8')
+  return { ...meta, input, output, _filePath: path.join(dir, fileName) }
+}
+
+function getSkillOutputs() {
+  const dir = path.join(getVaultPath(), 'Skills', 'Outputs')
+  if (!fs.existsSync(dir)) return []
+  const files = fs.readdirSync(dir).filter(f => f.endsWith('.md')).sort().reverse().slice(0, 200)
+  return files.map(f => {
+    try {
+      const content = fs.readFileSync(path.join(dir, f), 'utf-8')
+      const { meta, body } = parseFrontmatter(content)
+      return { ...meta, body: body.trim(), _filePath: path.join(dir, f) }
+    } catch { return null }
+  }).filter(Boolean)
+}
+
+function deleteSkillOutput(id) {
+  const dir = path.join(getVaultPath(), 'Skills', 'Outputs')
+  if (!fs.existsSync(dir)) return false
+  for (const f of fs.readdirSync(dir).filter(f => f.endsWith('.md'))) {
+    try {
+      const content = fs.readFileSync(path.join(dir, f), 'utf-8')
+      const { meta } = parseFrontmatter(content)
+      if (meta.id === id) { fs.unlinkSync(path.join(dir, f)); return true }
+    } catch {}
+  }
+  return false
+}
+
 module.exports = {
   initVault,
   buildIndex,
@@ -1002,4 +1050,7 @@ module.exports = {
   getChannel,
   updateChannelStatus,
   updateItemField: updateFrontmatterField,
+  saveSkillOutput,
+  getSkillOutputs,
+  deleteSkillOutput,
 }

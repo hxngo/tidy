@@ -1406,6 +1406,38 @@ function setupIpcHandlers(ipcMain, getWindow) {
     }
   })
 
+  // ─── 스킬 실행 & 출력물 관리 ────────────────────────────────
+  ipcMain.handle('skill:run', async (_event, { skillId, input, sourceItemId }) => {
+    try {
+      const { runSkill } = require('./core/ai')
+      const SKILL_LABELS = {
+        summary: '요약', translate: '번역', minutes: '회의록', report: '보고서',
+        kpi: 'KPI 현황', slides: '슬라이드', budget: '예산표', notebook: '노트', onboarding: '온보딩',
+      }
+      const output = await runSkill(skillId, input)
+      const skillLabel = SKILL_LABELS[skillId] || skillId
+      const saved = vault.saveSkillOutput({ skillId, skillLabel, input, output, sourceItemId })
+      return { success: true, output, id: saved.id }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('skill:outputs:get', async () => {
+    try {
+      return vault.getSkillOutputs()
+    } catch { return [] }
+  })
+
+  ipcMain.handle('skill:outputs:delete', async (_event, { id }) => {
+    try {
+      vault.deleteSkillOutput(id)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
 }
 
 // 파일 업로드 처리 공통 함수 (IPC + WatchFolder 모두 사용)

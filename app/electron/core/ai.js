@@ -300,4 +300,33 @@ async function generateWeeklyReport(items, tasks) {
   return response.content[0].text.trim()
 }
 
-module.exports = { analyzeMessage, analyzeImageFile, processNlTaskAction, generateReplyDraft, generateWeeklyReport }
+// ─── 스킬 프롬프트 ────────────────────────────────────────────
+const SKILL_PROMPTS = {
+  summary:    '다음 내용을 핵심 3줄 이내로 요약하세요. 마크다운 불릿으로 출력.',
+  translate:  '다음 텍스트를 한국어이면 영어로, 영어이면 한국어로 번역하세요. 번역문만 출력하세요.',
+  minutes:    '다음 대화/내용을 회의록 형식으로 한국어로 정리하세요.\n형식: ## 일시 / ## 참석자 / ## 논의 내용 / ## 결정 사항 / ## 액션 아이템',
+  report:     '다음 내용을 바탕으로 한국어 업무 보고서를 작성하세요.\n형식: ## 개요 / ## 주요 내용 / ## 이슈 및 리스크 / ## 다음 단계',
+  kpi:        '다음 내용에서 KPI 관련 수치와 지표를 추출해 마크다운 표로 정리하세요.',
+  slides:     '다음 내용을 발표자료 구조로 변환하세요. ## 슬라이드 제목 형식으로 각 슬라이드를 작성하고, 불릿 포인트로 내용 정리.',
+  budget:     '다음 내용에서 예산/비용 정보를 추출해 마크다운 표 (항목 | 금액 | 비고) 형식으로 정리하세요.',
+  notebook:   '다음 내용을 노트 형식으로 한국어로 정리하세요.\n형식: ## 핵심 개념 / ## 주요 포인트 / ## 메모',
+  onboarding: '다음 내용을 바탕으로 신규 팀원을 위한 온보딩 가이드를 한국어로 작성하세요.\n형식: ## 개요 / ## 필수 정보 / ## 할 일 체크리스트 / ## 참고 자료',
+}
+
+async function runSkill(skillId, input) {
+  const client = getClient()
+  const prompt = SKILL_PROMPTS[skillId]
+  if (!prompt) throw new Error(`알 수 없는 스킬: ${skillId}`)
+
+  const msg = await client.messages.create({
+    model: MODEL,
+    max_tokens: 2048,
+    messages: [{
+      role: 'user',
+      content: `${prompt}\n\n---\n\n${input}`,
+    }],
+  })
+  return msg.content[0]?.text?.trim() || ''
+}
+
+module.exports = { analyzeMessage, analyzeImageFile, processNlTaskAction, generateReplyDraft, generateWeeklyReport, runSkill }

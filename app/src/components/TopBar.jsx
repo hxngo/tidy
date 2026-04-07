@@ -96,6 +96,11 @@ const Ic = {
       <path d="M4.5 12h1M7.5 12h1M10.5 12h1"/>
     </svg>
   ),
+  skills: (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 2L7 8H2l4 3-1.5 5L9 13l4.5 3L12 11l4-3H11L9 2z"/>
+    </svg>
+  ),
 }
 
 const NAV_ITEMS = [
@@ -103,6 +108,7 @@ const NAV_ITEMS = [
   { to: '/tasks', label: '태스크', icon: 'tasks' },
   { to: '/people', label: '인물', icon: 'people' },
   { to: '/calendar', label: '캘린더', icon: 'calendar' },
+  { to: '/skills', label: '스킬', icon: 'skills' },
 ]
 
 export default function TopBar({ syncStatus = {}, newCount = 0, onNavigateToItem }) {

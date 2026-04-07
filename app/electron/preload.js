@@ -154,4 +154,11 @@ contextBridge.exposeInMainWorld('tidy', {
   navigate: {
     onInboxItem: (cb) => makeListener('navigate:inbox-item', cb),
   },
+
+  // 스킬 실행 & 출력물 보관함
+  skills: {
+    run: (params) => ipcRenderer.invoke('skill:run', params),
+    getOutputs: () => ipcRenderer.invoke('skill:outputs:get'),
+    deleteOutput: (id) => ipcRenderer.invoke('skill:outputs:delete', { id }),
+  },
 })

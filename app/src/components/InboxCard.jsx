@@ -1,4 +1,13 @@
 import { useState } from 'react'
+import SkillPanel from './SkillPanel.jsx'
+
+// 인박스 카드 퀵 스킬 (가장 자주 쓰는 4개)
+const QUICK_SKILLS = [
+  { id: 'summary',   label: '요약',   color: '#6366f1' },
+  { id: 'translate', label: '번역',   color: '#0ea5e9' },
+  { id: 'minutes',   label: '회의록', color: '#8b5cf6' },
+  { id: 'report',    label: '보고서', color: '#3b82f6' },
+]
 
 // ─── Category system ─────────────────────────────────────────────────────────
 
@@ -121,6 +130,7 @@ function canReply(source = '') {
 export default function InboxCard({ item, sourceConfig, onMarkDone, onRestore, onDelete, onClick }) {
   const [checkedItems, setCheckedItems] = useState({})
   const [actionsExpanded, setActionsExpanded] = useState(false)
+  const [skillPanel, setSkillPanel] = useState({ open: false, skillId: null })
   // category가 'app'/'앱'이면 실제 앱 이름으로 교체
   const isAppCategory = item.category === 'app' || item.category === '앱'
   const appName = isAppCategory
@@ -141,6 +151,7 @@ export default function InboxCard({ item, sourceConfig, onMarkDone, onRestore, o
   const sourceLabel = sourceConfig?.label || item.source?.split('.').pop() || '알림'
 
   return (
+  <>
     <div
       className={`group relative rounded-xl overflow-hidden border transition-all cursor-pointer fade-in ${
         isDone
@@ -257,6 +268,25 @@ export default function InboxCard({ item, sourceConfig, onMarkDone, onRestore, o
           </div>
         )}
 
+        {/* ── Quick skill buttons ── */}
+        {!isDone && (
+          <div className={`flex items-center gap-1 mb-2 transition-opacity duration-150 opacity-0 group-hover:opacity-100`}>
+            {QUICK_SKILLS.map(skill => (
+              <button
+                key={skill.id}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setSkillPanel({ open: true, skillId: skill.id })
+                }}
+                className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md border border-[#1c1e2c] hover:border-[#2a2c40] transition-colors"
+                style={{ color: skill.color, background: skill.color + '12' }}
+              >
+                {skill.label}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* ── Footer actions ── */}
         <div className={`flex items-center gap-0.5 pt-2.5 border-t border-[#13141e] transition-opacity duration-150 ${isDone ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
           <button
@@ -311,6 +341,16 @@ export default function InboxCard({ item, sourceConfig, onMarkDone, onRestore, o
         </div>
       </div>
     </div>
+
+    {/* Skill output panel */}
+    <SkillPanel
+      open={skillPanel.open}
+      onClose={() => setSkillPanel({ open: false, skillId: null })}
+      skillId={skillPanel.skillId}
+      input={item.summary || item.raw_text || ''}
+      sourceItemId={item.id}
+    />
+  </>
   )
 }
 
