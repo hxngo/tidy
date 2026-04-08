@@ -11,15 +11,17 @@ import json
 import os
 
 SKILL_CONFIG = {
-    'nlm-slides':      {'generate': 'slide_deck',  'download': 'slide_deck',  'ext': 'pptx', 'label': '슬라이드 덱'},
-    'nlm-audio':       {'generate': 'audio',        'download': 'audio',       'ext': 'mp3',  'label': '오디오 요약'},
-    'nlm-video':       {'generate': 'video',        'download': 'video',       'ext': 'mp4',  'label': '영상 요약'},
-    'nlm-infographic': {'generate': 'infographic',  'download': 'infographic', 'ext': 'png',  'label': '인포그래픽'},
-    'nlm-quiz':        {'generate': 'quiz',         'download': 'quiz',        'ext': 'md',   'label': '퀴즈',       'dl_kwargs': {'output_format': 'markdown'}},
-    'nlm-flashcards':  {'generate': 'flashcards',   'download': 'flashcards',  'ext': 'md',   'label': '플래시카드', 'dl_kwargs': {'output_format': 'markdown'}},
-    'nlm-datatable':   {'generate': 'data_table',   'download': 'data_table',  'ext': 'csv',  'label': '데이터 표'},
-    'nlm-report':      {'generate': 'report',       'download': 'report',      'ext': 'md',   'label': '브리핑 문서'},
-    'nlm-mindmap':     {'generate': 'mind_map',     'download': 'mind_map',    'ext': 'json', 'label': '마인드맵',   'no_wait': True},
+    # timeout: wait_for_completion 타임아웃 (초)
+    # source_timeout: add_text wait_timeout (초)
+    'nlm-slides':      {'generate': 'slide_deck',  'download': 'slide_deck',  'ext': 'pptx', 'label': '슬라이드 덱',  'timeout': 600,  'source_timeout': 180},
+    'nlm-audio':       {'generate': 'audio',        'download': 'audio',       'ext': 'mp3',  'label': '오디오 요약',  'timeout': 1200, 'source_timeout': 180},
+    'nlm-video':       {'generate': 'video',        'download': 'video',       'ext': 'mp4',  'label': '영상 요약',    'timeout': 1800, 'source_timeout': 180},
+    'nlm-infographic': {'generate': 'infographic',  'download': 'infographic', 'ext': 'png',  'label': '인포그래픽',   'timeout': 600,  'source_timeout': 180},
+    'nlm-quiz':        {'generate': 'quiz',         'download': 'quiz',        'ext': 'md',   'label': '퀴즈',         'timeout': 300,  'source_timeout': 120, 'dl_kwargs': {'output_format': 'markdown'}},
+    'nlm-flashcards':  {'generate': 'flashcards',   'download': 'flashcards',  'ext': 'md',   'label': '플래시카드',   'timeout': 300,  'source_timeout': 120, 'dl_kwargs': {'output_format': 'markdown'}},
+    'nlm-datatable':   {'generate': 'data_table',   'download': 'data_table',  'ext': 'csv',  'label': '데이터 표',    'timeout': 300,  'source_timeout': 120},
+    'nlm-report':      {'generate': 'report',       'download': 'report',      'ext': 'md',   'label': '브리핑 문서',  'timeout': 300,  'source_timeout': 120},
+    'nlm-mindmap':     {'generate': 'mind_map',     'download': 'mind_map',    'ext': 'json', 'label': '마인드맵',     'timeout': 300,  'source_timeout': 120, 'no_wait': True},
 }
 
 def log(data):
@@ -62,8 +64,14 @@ async def main():
             nb_id = nb.id if hasattr(nb, 'id') else nb['id']
 
             try:
+                source_timeout = cfg.get('source_timeout', 180)
+                completion_timeout = cfg.get('timeout', 600)
+
                 log({'progress': '콘텐츠 업로드 중...', 'step': 2, 'total': 5})
-                await client.sources.add_text(nb_id, title=title, content=content, wait=True)
+                await client.sources.add_text(
+                    nb_id, title=title, content=content,
+                    wait=True, wait_timeout=source_timeout
+                )
 
                 log({'progress': f'{cfg["label"]} 생성 중... (시간이 걸릴 수 있습니다)', 'step': 3, 'total': 5})
                 gen_fn = getattr(client.artifacts, f'generate_{cfg["generate"]}')
@@ -75,8 +83,8 @@ async def main():
                     status = await gen_fn(nb_id, language=language)
                     task_id = status.task_id if hasattr(status, 'task_id') else status['task_id']
 
-                    log({'progress': '생성 완료 대기 중...', 'step': 4, 'total': 5})
-                    await client.artifacts.wait_for_completion(nb_id, task_id)
+                    log({'progress': f'생성 완료 대기 중... (최대 {completion_timeout//60}분)', 'step': 4, 'total': 5})
+                    await client.artifacts.wait_for_completion(nb_id, task_id, timeout=completion_timeout)
 
                 log({'progress': '파일 다운로드 중...', 'step': 5, 'total': 5})
 

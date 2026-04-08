@@ -92,6 +92,19 @@ function openLogin() {
   )
 }
 
+// 스킬별 Node.js 프로세스 타임아웃 (ms) — Python 스크립트 내부 timeout + 여유 60초
+const SKILL_PROCESS_TIMEOUT = {
+  'nlm-audio': 1260000,   // 21분
+  'nlm-video': 1860000,   // 31분
+  'nlm-slides': 660000,   // 11분
+  'nlm-infographic': 660000,
+  'nlm-quiz': 360000,
+  'nlm-flashcards': 360000,
+  'nlm-datatable': 360000,
+  'nlm-report': 360000,
+  'nlm-mindmap': 360000,
+}
+
 // 스킬 실행 (Python 서브프로세스)
 function runSkill(skillId, content, { onProgress, title = 'Tidy Input', language = 'ko' } = {}) {
   return new Promise(async (resolve, reject) => {
@@ -106,6 +119,13 @@ function runSkill(skillId, content, { onProgress, title = 'Tidy Input', language
     const proc = spawn(setup.python, [SCRIPT_PATH, skillId, OUTPUT_DIR], {
       stdio: ['pipe', 'pipe', 'pipe'],
     })
+
+    // 프로세스 타임아웃 (기본 11분, 오디오/영상은 더 길게)
+    const timeoutMs = SKILL_PROCESS_TIMEOUT[skillId] || 660000
+    const timer = setTimeout(() => {
+      proc.kill()
+      reject(new Error(`시간 초과 (${timeoutMs / 60000}분). 텍스트를 줄이거나 나중에 다시 시도하세요.`))
+    }, timeoutMs)
 
     proc.stdin.write(JSON.stringify({ content, language, title }))
     proc.stdin.end()
@@ -127,6 +147,7 @@ function runSkill(skillId, content, { onProgress, title = 'Tidy Input', language
     proc.stderr.on('data', d => { errorMsg += d.toString() })
 
     proc.on('close', code => {
+      clearTimeout(timer)
       if (result) resolve(result)
       else {
         const err = new Error(errorMsg || `프로세스 종료 코드: ${code}`)
