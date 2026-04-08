@@ -18,10 +18,10 @@ SKILL_CONFIG = {
     'nlm-audio':       {'generate': 'audio',        'download': 'audio',       'ext': 'mp3',  'label': '오디오 요약',  'timeout': 1200, 'source_timeout': 180},
     'nlm-video':       {'generate': 'video',        'download': 'video',       'ext': 'mp4',  'label': '영상 요약',    'timeout': 1800, 'source_timeout': 180},
     'nlm-infographic': {'generate': 'infographic',  'download': 'infographic', 'ext': 'png',  'label': '인포그래픽',   'timeout': 900,  'source_timeout': 180},
-    'nlm-quiz':        {'generate': 'quiz',         'download': 'quiz',        'ext': 'md',   'label': '퀴즈',         'timeout': 540,  'source_timeout': 180, 'no_language': True, 'include_content': True, 'dl_kwargs': {'output_format': 'markdown'}},
-    'nlm-flashcards':  {'generate': 'flashcards',   'download': 'flashcards',  'ext': 'md',   'label': '플래시카드',   'timeout': 540,  'source_timeout': 180, 'no_language': True, 'include_content': True, 'dl_kwargs': {'output_format': 'markdown'}},
-    'nlm-datatable':   {'generate': 'data_table',   'download': 'data_table',  'ext': 'csv',  'label': '데이터 표',    'timeout': 540,  'source_timeout': 180, 'no_language': True},
-    'nlm-report':      {'generate': 'report',       'download': 'report',      'ext': 'md',   'label': '브리핑 문서',  'timeout': 540,  'source_timeout': 180, 'no_language': True},
+    'nlm-quiz':        {'generate': 'quiz',         'download': 'quiz',        'ext': 'md',   'label': '퀴즈',         'timeout': 780,  'source_timeout': 240, 'gen_timeout': 180, 'no_language': True, 'include_content': True, 'dl_kwargs': {'output_format': 'markdown'}},
+    'nlm-flashcards':  {'generate': 'flashcards',   'download': 'flashcards',  'ext': 'md',   'label': '플래시카드',   'timeout': 780,  'source_timeout': 240, 'gen_timeout': 180, 'no_language': True, 'include_content': True, 'dl_kwargs': {'output_format': 'markdown'}},
+    'nlm-datatable':   {'generate': 'data_table',   'download': 'data_table',  'ext': 'csv',  'label': '데이터 표',    'timeout': 780,  'source_timeout': 240, 'gen_timeout': 180, 'no_language': True},
+    'nlm-report':      {'generate': 'report',       'download': 'report',      'ext': 'md',   'label': '브리핑 문서',  'timeout': 780,  'source_timeout': 240, 'gen_timeout': 180, 'no_language': True},
     'nlm-mindmap':     {'generate': 'mind_map',     'download': 'mind_map',    'ext': 'html', 'label': '마인드맵',     'timeout': 300,  'source_timeout': 120, 'no_wait': True, 'post': 'mindmap_to_html'},
 }
 
@@ -141,6 +141,7 @@ async def main():
 
                 log({'progress': f'{cfg["label"]} 생성 중... (시간이 걸릴 수 있습니다)', 'step': 3, 'total': 5})
                 gen_fn = getattr(client.artifacts, f'generate_{cfg["generate"]}')
+                gen_timeout = cfg.get('gen_timeout', 300)
 
                 if cfg.get('no_wait'):
                     # mind_map은 generate 자체가 완료까지 대기 (GenerationStatus 반환 안 함)
@@ -148,7 +149,8 @@ async def main():
                     log({'progress': '생성 완료', 'step': 4, 'total': 5})
                 else:
                     gen_kwargs = {} if cfg.get('no_language') else {'language': language}
-                    status = await gen_fn(nb_id, **gen_kwargs)
+                    # generate 호출 자체도 타임아웃 적용 (무한 대기 방지)
+                    status = await asyncio.wait_for(gen_fn(nb_id, **gen_kwargs), timeout=gen_timeout)
                     task_id = status.task_id if hasattr(status, 'task_id') else status['task_id']
 
                     log({'progress': f'생성 완료 대기 중... (최대 {completion_timeout // 60}분)', 'step': 4, 'total': 5})

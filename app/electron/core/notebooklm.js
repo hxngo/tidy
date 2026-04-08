@@ -100,10 +100,10 @@ const SKILL_PROCESS_TIMEOUT = {
   'nlm-video': 1860000,    // 31분
   'nlm-slides': 960000,    // 16분  (source 180s + completion 600s + 180s)
   'nlm-infographic': 1260000, // 21분 (source 180s + completion 900s + 180s)
-  'nlm-quiz': 900000,      // 15분
-  'nlm-flashcards': 900000, // 15분
-  'nlm-datatable': 900000,  // 15분
-  'nlm-report': 900000,     // 15분
+  'nlm-quiz': 1320000,      // 22분 (source 240s + gen 180s + completion 780s + 여유 120s)
+  'nlm-flashcards': 1320000, // 22분
+  'nlm-datatable': 1320000,  // 22분
+  'nlm-report': 1320000,     // 22분
   'nlm-mindmap': 420000,    // 7분
 }
 
