@@ -97,7 +97,7 @@ const SKILL_PROCESS_TIMEOUT = {
   'nlm-audio': 1260000,   // 21분
   'nlm-video': 1860000,   // 31분
   'nlm-slides': 660000,   // 11분
-  'nlm-infographic': 660000,
+  'nlm-infographic': 960000,   // 16분
   'nlm-quiz': 360000,
   'nlm-flashcards': 360000,
   'nlm-datatable': 360000,

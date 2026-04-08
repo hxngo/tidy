@@ -16,7 +16,7 @@ SKILL_CONFIG = {
     'nlm-slides':      {'generate': 'slide_deck',  'download': 'slide_deck',  'ext': 'pptx', 'label': '슬라이드 덱',  'timeout': 600,  'source_timeout': 180},
     'nlm-audio':       {'generate': 'audio',        'download': 'audio',       'ext': 'mp3',  'label': '오디오 요약',  'timeout': 1200, 'source_timeout': 180},
     'nlm-video':       {'generate': 'video',        'download': 'video',       'ext': 'mp4',  'label': '영상 요약',    'timeout': 1800, 'source_timeout': 180},
-    'nlm-infographic': {'generate': 'infographic',  'download': 'infographic', 'ext': 'png',  'label': '인포그래픽',   'timeout': 600,  'source_timeout': 180},
+    'nlm-infographic': {'generate': 'infographic',  'download': 'infographic', 'ext': 'png',  'label': '인포그래픽',   'timeout': 900,  'source_timeout': 180},
     'nlm-quiz':        {'generate': 'quiz',         'download': 'quiz',        'ext': 'md',   'label': '퀴즈',         'timeout': 300,  'source_timeout': 120, 'dl_kwargs': {'output_format': 'markdown'}},
     'nlm-flashcards':  {'generate': 'flashcards',   'download': 'flashcards',  'ext': 'md',   'label': '플래시카드',   'timeout': 300,  'source_timeout': 120, 'dl_kwargs': {'output_format': 'markdown'}},
     'nlm-datatable':   {'generate': 'data_table',   'download': 'data_table',  'ext': 'csv',  'label': '데이터 표',    'timeout': 300,  'source_timeout': 120},
@@ -141,7 +141,12 @@ async def main():
                     task_id = status.task_id if hasattr(status, 'task_id') else status['task_id']
 
                     log({'progress': f'생성 완료 대기 중... (최대 {completion_timeout//60}분)', 'step': 4, 'total': 5})
-                    await client.artifacts.wait_for_completion(nb_id, task_id, timeout=completion_timeout)
+                    # asyncio.wait_for로 타임아웃 강제 적용
+                    # (wait_for_completion의 timeout 파라미터가 무시되는 경우 대비)
+                    await asyncio.wait_for(
+                        client.artifacts.wait_for_completion(nb_id, task_id),
+                        timeout=completion_timeout
+                    )
 
                 log({'progress': '파일 다운로드 중...', 'step': 5, 'total': 5})
 
