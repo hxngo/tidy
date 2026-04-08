@@ -25,7 +25,9 @@ export default function Home() {
   const [skillRunnerOpen, setSkillRunnerOpen] = useState(false)
   const [selectedSkillId, setSelectedSkillId] = useState(null)
   const [skillRunnerText, setSkillRunnerText] = useState('')
+  const [skillRunnerFile, setSkillRunnerFile] = useState(null) // { name }
   const skillRunnerTextRef = useRef(null)
+  const skillFileInputRef = useRef(null)
 
   // 스킬 출력 패널
   const [skillPanelOpen, setSkillPanelOpen] = useState(false)
@@ -170,9 +172,25 @@ export default function Home() {
   function openSkillRunner(skillId) {
     setSelectedSkillId(skillId)
     setSkillRunnerText(value.trim())
+    setSkillRunnerFile(null)
     setSkillRunnerOpen(true)
     setShowSkillPicker(false)
     setTimeout(() => skillRunnerTextRef.current?.focus(), 50)
+  }
+
+  // 스킬 모달 파일 첨부 처리
+  async function handleSkillFile(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    const res = await window.tidy?.skills.readFile(file.path)
+    if (res?.success && res.text) {
+      setSkillRunnerText(res.text)
+      setSkillRunnerFile({ name: res.name })
+      setTimeout(() => skillRunnerTextRef.current?.focus(), 50)
+    } else {
+      alert(res?.error || '파일을 읽을 수 없습니다')
+    }
   }
 
   // 스킬 실행 → 출력 패널 열기
@@ -439,14 +457,44 @@ export default function Home() {
 
             {/* 텍스트 입력 영역 */}
             <div className="px-5 py-4">
-              <label className="text-[10px] font-semibold text-[#505272] uppercase tracking-widest mb-2 block">
-                처리할 텍스트
-              </label>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-[10px] font-semibold text-[#505272] uppercase tracking-widest">
+                  처리할 텍스트
+                </label>
+                <div className="flex items-center gap-2">
+                  {skillRunnerFile && (
+                    <span className="flex items-center gap-1 text-[10px] text-[#6366f1] bg-[#6366f1]/10 border border-[#6366f1]/20 px-2 py-0.5 rounded-full">
+                      <svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M4 2h6l4 4v8a1 1 0 01-1 1H3a1 1 0 01-1-1V3a1 1 0 011-1z"/><path d="M10 2v4h4"/>
+                      </svg>
+                      {skillRunnerFile.name}
+                      <button onClick={() => { setSkillRunnerFile(null); setSkillRunnerText('') }} className="ml-0.5 hover:text-red-400">×</button>
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => skillFileInputRef.current?.click()}
+                    className="flex items-center gap-1 text-[10px] text-[#505272] hover:text-[#9a9cb8] border border-[#1a1c28] hover:border-[#252840] px-2 py-1 rounded-lg transition-colors"
+                  >
+                    <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M4 2h6l4 4v8a1 1 0 01-1 1H3a1 1 0 01-1-1V3a1 1 0 011-1z"/><path d="M10 2v4h4"/>
+                    </svg>
+                    파일 첨부
+                  </button>
+                  <input
+                    ref={skillFileInputRef}
+                    type="file"
+                    className="hidden"
+                    accept=".txt,.md,.pdf,.docx,.hwp,.csv,.eml,.vtt"
+                    onChange={handleSkillFile}
+                  />
+                </div>
+              </div>
               <textarea
                 ref={skillRunnerTextRef}
                 value={skillRunnerText}
                 onChange={(e) => setSkillRunnerText(e.target.value)}
-                placeholder="텍스트를 입력하거나 붙여넣기하세요..."
+                placeholder="텍스트를 입력하거나 붙여넣기하세요... 또는 파일을 첨부하세요"
                 rows={6}
                 className="w-full bg-[#09090c] border border-[#1a1c28] rounded-xl px-4 py-3 text-[13px] text-[#c8c8d8] placeholder-[#2a2c48] focus:outline-none focus:border-[#2e3060] resize-none leading-relaxed transition-colors"
               />

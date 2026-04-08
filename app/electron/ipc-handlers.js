@@ -1431,6 +1431,17 @@ function setupIpcHandlers(ipcMain, getWindow) {
     } catch { return [] }
   })
 
+  // 스킬 입력용 파일 읽기 — 인박스 저장 없이 텍스트만 추출
+  ipcMain.handle('skill:read-file', async (_event, { filePath }) => {
+    try {
+      const text = await extractText(filePath)
+      const name = path.basename(filePath)
+      return { success: true, text, name }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
   ipcMain.handle('skill:outputs:delete', async (_event, { id }) => {
     try {
       vault.deleteSkillOutput(id)

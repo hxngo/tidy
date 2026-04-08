@@ -162,6 +162,7 @@ contextBridge.exposeInMainWorld('tidy', {
     deleteOutput: (id) => ipcRenderer.invoke('skill:outputs:delete', { id }),
     openInApp: (params) => ipcRenderer.invoke('skill:open-in-app', params),
     openHwpFile: (filePath) => ipcRenderer.invoke('skill:open-hwp-file', { filePath }),
+    readFile: (filePath) => ipcRenderer.invoke('skill:read-file', { filePath }),
   },
 
   // NotebookLM 스킬
