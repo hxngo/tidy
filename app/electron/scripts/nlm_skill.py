@@ -13,7 +13,7 @@ import os
 SKILL_CONFIG = {
     # timeout: wait_for_completion 타임아웃 (초)
     # source_timeout: add_text wait_timeout (초)
-    'nlm-slides':      {'generate': 'slide_deck',  'download': 'slide_deck',  'ext': 'pptx', 'label': '슬라이드 덱',  'timeout': 600,  'source_timeout': 180},
+    'nlm-slides':      {'generate': 'slide_deck',  'download': 'slide_deck',  'ext': 'pptx', 'label': '슬라이드 덱',  'timeout': 600,  'source_timeout': 180, 'detect_ext': True},
     'nlm-audio':       {'generate': 'audio',        'download': 'audio',       'ext': 'mp3',  'label': '오디오 요약',  'timeout': 1200, 'source_timeout': 180},
     'nlm-video':       {'generate': 'video',        'download': 'video',       'ext': 'mp4',  'label': '영상 요약',    'timeout': 1800, 'source_timeout': 180},
     'nlm-infographic': {'generate': 'infographic',  'download': 'infographic', 'ext': 'png',  'label': '인포그래픽',   'timeout': 600,  'source_timeout': 180},
@@ -26,6 +26,30 @@ SKILL_CONFIG = {
 
 def log(data):
     print(json.dumps(data, ensure_ascii=False), flush=True)
+
+def _fix_extension(path_str):
+    """파일 매직 바이트로 실제 포맷을 감지해 확장자를 수정한다."""
+    import shutil
+    with open(path_str, 'rb') as f:
+        header = f.read(8)
+
+    # PDF: %PDF
+    if header[:4] == b'%PDF':
+        real_ext = 'pdf'
+    # PPTX/XLSX/DOCX (ZIP): PK\x03\x04
+    elif header[:4] == b'PK\x03\x04':
+        real_ext = 'pptx'  # ZIP 기반이면 그대로 pptx 유지
+    else:
+        return path_str  # 알 수 없으면 그대로
+
+    base, cur_ext = os.path.splitext(path_str)
+    if cur_ext.lstrip('.') == real_ext:
+        return path_str  # 이미 맞음
+
+    new_path = f'{base}.{real_ext}'
+    shutil.move(path_str, new_path)
+    log({'info': f'실제 포맷 감지: {real_ext.upper()} → 파일명 수정'})
+    return new_path
 
 async def main():
     if len(sys.argv) < 3:
@@ -94,6 +118,10 @@ async def main():
                 dl_fn = getattr(client.artifacts, f'download_{cfg["download"]}')
                 dl_kwargs = cfg.get('dl_kwargs', {})
                 await dl_fn(nb_id, out_path, **dl_kwargs)
+
+                # 실제 파일 포맷 감지 — 확장자와 실제 내용이 다를 경우 수정
+                if cfg.get('detect_ext'):
+                    out_path = _fix_extension(out_path)
 
                 log({'done': True, 'path': out_path, 'ext': cfg['ext'], 'label': cfg['label']})
 

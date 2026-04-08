@@ -1542,6 +1542,7 @@ function setupIpcHandlers(ipcMain, getWindow) {
 
     const NLM_APP_MAP = {
       pptx: pptxApp,
+      pdf:  'Preview',
       mp3:  'QuickTime Player',
       mp4:  'QuickTime Player',
       png:  'Preview',
