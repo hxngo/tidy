@@ -1559,11 +1559,21 @@ function setupIpcHandlers(ipcMain, getWindow) {
         onProgress: (msg) => event.sender.send('nlm:progress', msg),
       })
 
-      // 생성된 파일을 네이티브 앱으로 열기
+      // 앱 내 인터랙티브 뷰어 스킬은 외부 앱으로 열지 않음
+      const IN_APP_SKILLS = ['nlm-quiz', 'nlm-flashcards']
       const appName = NLM_APP_MAP[result.ext] || 'Finder'
-      exec(`open -a "${appName}" "${result.path}" 2>/dev/null || open "${result.path}"`)
+      if (!IN_APP_SKILLS.includes(skillId)) {
+        exec(`open -a "${appName}" "${result.path}" 2>/dev/null || open "${result.path}"`)
+      }
 
-      return { success: true, path: result.path, ext: result.ext, label: result.label, app: appName }
+      return {
+        success: true,
+        path: result.path,
+        ext: result.ext,
+        label: result.label,
+        app: appName,
+        content: result.content || null,  // quiz/flashcard 마크다운 내용 (인터랙티브 뷰어용)
+      }
     } catch (error) {
       return {
         success: false,
