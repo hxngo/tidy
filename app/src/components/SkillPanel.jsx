@@ -18,7 +18,7 @@ export const AI_SKILLS = [
     detail: '내용을 제목·소제목·핵심 포인트·메모 구조의 노트 형식으로 깔끔하게 정리합니다.' },
   { id: 'onboarding', label: '온보딩',   icon: '▷',  desc: '온보딩 가이드 생성',          color: '#f97316', type: 'ai',
     detail: '업무 내용을 신규 팀원이 이해하기 쉬운 단계별 온보딩 가이드 문서로 변환합니다.' },
-  { id: 'hwp',        label: '공문서',   icon: '文',  desc: 'HWP 공문서 형식으로 변환',    color: '#64748b', type: 'ai',
+  { id: 'hwp',        label: 'HWP',      icon: '文',  desc: 'HWP 공문서 형식으로 변환',    color: '#64748b', type: 'ai',
     detail: '내용을 수신·발신·제목·본문·붙임 형식의 공문서 양식으로 변환하고 HWP 파일로 저장합니다.' },
 ]
 
