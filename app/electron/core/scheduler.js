@@ -2,7 +2,13 @@ const { Notification, powerMonitor } = require('electron')
 const store = require('../store')
 const { fetchUnseenEmails } = require('./imap')
 const { fetchNewMessages } = require('./slack')
-const { processIncomingMessage, processFileUpload } = require('../ipc-handlers')
+// 순환 의존성 방지: 호출 시점에 lazy require
+function processIncomingMessage(...args) {
+  return require('../ipc-handlers').processIncomingMessage(...args)
+}
+function processFileUpload(...args) {
+  return require('../ipc-handlers').processFileUpload(...args)
+}
 const notificationWatcher = require('./notification-watcher')
 const watchFolder = require('./watch-folder')
 const vault = require('./vault')
