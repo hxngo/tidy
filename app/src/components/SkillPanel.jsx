@@ -2,29 +2,48 @@ import { useState, useEffect, useRef } from 'react'
 
 // ─── AI 스킬 (로컬, 빠름) ──────────────────────────────────────
 export const AI_SKILLS = [
-  { id: 'summary',    label: '요약',     icon: '✦',  desc: '핵심 내용 3줄 요약',          color: '#6366f1', type: 'ai' },
-  { id: 'translate',  label: '번역',     icon: '⇄',  desc: '한↔영 자동 번역',             color: '#0ea5e9', type: 'ai' },
-  { id: 'minutes',    label: '회의록',   icon: '◉',  desc: '대화를 회의록으로 정리',        color: '#8b5cf6', type: 'ai' },
-  { id: 'report',     label: '보고서',   icon: '▤',  desc: '업무 보고서 작성',              color: '#3b82f6', type: 'ai' },
-  { id: 'kpi',        label: 'KPI',      icon: '◈',  desc: 'KPI 수치를 표로 정리',          color: '#f59e0b', type: 'ai' },
-  { id: 'slides',     label: '슬라이드', icon: '▨',  desc: '발표자료 구조로 변환',          color: '#ec4899', type: 'ai' },
-  { id: 'budget',     label: '예산표',   icon: '◫',  desc: '비용 항목을 표로 정리',         color: '#10b981', type: 'ai' },
-  { id: 'notebook',   label: '노트',     icon: '◻',  desc: '노트 형식으로 정리',            color: '#84cc16', type: 'ai' },
-  { id: 'onboarding', label: '온보딩',   icon: '▷',  desc: '온보딩 가이드 생성',            color: '#f97316', type: 'ai' },
-  { id: 'hwp',        label: '공문서',   icon: '文',  desc: 'HWP 공문서 형식으로 변환',      color: '#64748b', type: 'ai' },
+  { id: 'summary',    label: '요약',     icon: '✦',  desc: '핵심 내용 3줄 요약',         color: '#6366f1', type: 'ai',
+    detail: '이메일·문서·대화 내용을 핵심 내용 3줄로 압축합니다. 긴 텍스트를 빠르게 파악하고 싶을 때 사용하세요.' },
+  { id: 'translate',  label: '번역',     icon: '⇄',  desc: '한↔영 자동 번역',            color: '#0ea5e9', type: 'ai',
+    detail: '한국어→영어, 영어→한국어를 자동으로 감지하여 번역합니다. 자연스러운 문맥을 유지하며 번역합니다.' },
+  { id: 'minutes',    label: '회의록',   icon: '◉',  desc: '대화를 회의록으로 정리',      color: '#8b5cf6', type: 'ai',
+    detail: '대화 내용이나 녹취록을 참석자·안건·결정사항·액션아이템이 담긴 회의록 형식으로 자동 정리합니다.' },
+  { id: 'report',     label: '보고서',   icon: '▤',  desc: '업무 보고서 작성',            color: '#3b82f6', type: 'ai',
+    detail: '업무 내용을 현황·분석·결론·건의사항 구조의 공식 보고서 형식으로 변환합니다.' },
+  { id: 'kpi',        label: 'KPI',      icon: '◈',  desc: 'KPI 수치를 표로 정리',        color: '#f59e0b', type: 'ai',
+    detail: '텍스트 안의 수치·지표·목표치를 추출해 KPI 현황표로 정리합니다. Numbers나 Excel에서 바로 활용 가능합니다.' },
+  { id: 'slides',     label: '슬라이드', icon: '▨',  desc: '발표자료 구조로 변환',        color: '#ec4899', type: 'ai',
+    detail: '내용을 슬라이드 제목·소제목·본문 구조로 변환합니다. 발표자료 초안 작성에 활용하세요.' },
+  { id: 'budget',     label: '예산표',   icon: '◫',  desc: '비용 항목을 표로 정리',       color: '#10b981', type: 'ai',
+    detail: '비용·예산 관련 내용을 항목·금액·비고 형태의 표로 정리하고 CSV 파일로 저장합니다.' },
+  { id: 'notebook',   label: '노트',     icon: '◻',  desc: '노트 형식으로 정리',          color: '#84cc16', type: 'ai',
+    detail: '내용을 제목·소제목·핵심 포인트·메모 구조의 노트 형식으로 깔끔하게 정리합니다.' },
+  { id: 'onboarding', label: '온보딩',   icon: '▷',  desc: '온보딩 가이드 생성',          color: '#f97316', type: 'ai',
+    detail: '업무 내용을 신규 팀원이 이해하기 쉬운 단계별 온보딩 가이드 문서로 변환합니다.' },
+  { id: 'hwp',        label: '공문서',   icon: '文',  desc: 'HWP 공문서 형식으로 변환',    color: '#64748b', type: 'ai',
+    detail: '내용을 수신·발신·제목·본문·붙임 형식의 공문서 양식으로 변환하고 HWP 파일로 저장합니다.' },
 ]
 
 // ─── NotebookLM 스킬 (클라우드, Google 계정 필요) ─────────────
 export const NLM_SKILLS = [
-  { id: 'nlm-slides',      label: '슬라이드',    icon: '⧉',  desc: '발표자료 PPTX 생성',          color: '#4285f4', type: 'nlm', ext: 'pptx', app: 'PowerPoint' },
-  { id: 'nlm-audio',       label: '오디오 요약', icon: '◎',  desc: '팟캐스트 형식 MP3 생성',       color: '#ea4335', type: 'nlm', ext: 'mp3',  app: 'QuickTime' },
-  { id: 'nlm-video',       label: '영상 요약',   icon: '▶',  desc: '설명 영상 MP4 생성',           color: '#db4437', type: 'nlm', ext: 'mp4',  app: 'QuickTime' },
-  { id: 'nlm-infographic', label: '인포그래픽',  icon: '◑',  desc: '시각화 이미지 PNG 생성',       color: '#0f9d58', type: 'nlm', ext: 'png',  app: 'Preview' },
-  { id: 'nlm-quiz',        label: '퀴즈',        icon: '？',  desc: '학습 퀴즈 생성',              color: '#f4b400', type: 'nlm', ext: 'md',   app: 'TextEdit' },
-  { id: 'nlm-flashcards',  label: '플래시카드',  icon: '⊟',  desc: '암기 카드 생성',              color: '#ff6d00', type: 'nlm', ext: 'md',   app: 'TextEdit' },
-  { id: 'nlm-datatable',   label: '데이터 표',   icon: '⊞',  desc: '구조화된 CSV 표 생성',        color: '#0f9d58', type: 'nlm', ext: 'csv',  app: 'Numbers' },
-  { id: 'nlm-report',      label: '브리핑 문서', icon: '≡',  desc: '브리핑 Markdown 문서 생성',    color: '#4285f4', type: 'nlm', ext: 'md',   app: 'TextEdit' },
-  { id: 'nlm-mindmap',     label: '마인드맵',    icon: '⊛',  desc: '마인드맵 시각화 생성',          color: '#ab47bc', type: 'nlm', ext: 'html', app: 'Safari' },
+  { id: 'nlm-slides',      label: '슬라이드',    icon: '⧉',  desc: '발표자료 PPTX 생성',         color: '#4285f4', type: 'nlm', ext: 'pptx', app: 'PowerPoint',
+    detail: 'Google NotebookLM이 내용을 분석해 발표자료 PPTX 파일을 생성합니다. Google One AI Premium 유료 계정 필요. PowerPoint 또는 Keynote에서 열립니다.' },
+  { id: 'nlm-audio',       label: '오디오 요약', icon: '◎',  desc: '팟캐스트 형식 MP3 생성',      color: '#ea4335', type: 'nlm', ext: 'mp3',  app: 'QuickTime',
+    detail: '두 명의 AI 진행자가 내용을 대화 형식으로 설명하는 팟캐스트 MP3를 생성합니다. 이동 중 청취하거나 내용을 귀로 복습할 때 유용합니다.' },
+  { id: 'nlm-video',       label: '영상 요약',   icon: '▶',  desc: '설명 영상 MP4 생성',          color: '#db4437', type: 'nlm', ext: 'mp4',  app: 'QuickTime',
+    detail: '내용을 시각적으로 설명하는 짧은 MP4 영상을 생성합니다. 복잡한 개념을 영상으로 전달하고 싶을 때 활용하세요.' },
+  { id: 'nlm-infographic', label: '인포그래픽',  icon: '◑',  desc: '시각화 이미지 PNG 생성',      color: '#0f9d58', type: 'nlm', ext: 'png',  app: 'Preview',
+    detail: '핵심 내용을 한눈에 파악할 수 있는 인포그래픽 이미지(PNG)를 생성합니다. 보고서·발표·SNS 등에 바로 활용할 수 있습니다.' },
+  { id: 'nlm-quiz',        label: '퀴즈',        icon: '？',  desc: '학습 퀴즈 생성',              color: '#f4b400', type: 'nlm', ext: 'md',   app: 'TextEdit',
+    detail: '내용 기반의 객관식 퀴즈를 생성합니다. 보기 순서는 랜덤으로 섞이며, Tidy 앱 안에서 바로 풀고 점수를 확인할 수 있습니다.' },
+  { id: 'nlm-flashcards',  label: '플래시카드',  icon: '⊟',  desc: '암기 카드 생성',              color: '#ff6d00', type: 'nlm', ext: 'md',   app: 'TextEdit',
+    detail: '핵심 개념을 앞면(질문)·뒷면(답) 형태의 플래시카드로 생성합니다. 카드를 클릭해 뒤집으며 학습하고 알고/모름으로 분류할 수 있습니다.' },
+  { id: 'nlm-datatable',   label: '데이터 표',   icon: '⊞',  desc: '구조화된 CSV 표 생성',        color: '#0f9d58', type: 'nlm', ext: 'csv',  app: 'Numbers',
+    detail: '텍스트에서 구조화된 데이터를 추출해 CSV 표로 저장합니다. Numbers나 Excel에서 바로 열 수 있습니다.' },
+  { id: 'nlm-report',      label: '브리핑 문서', icon: '≡',  desc: '브리핑 Markdown 문서 생성',   color: '#4285f4', type: 'nlm', ext: 'md',   app: 'TextEdit',
+    detail: '내용을 핵심 포인트·배경·시사점이 담긴 전문적인 브리핑 문서로 작성합니다. Markdown 형식으로 저장됩니다.' },
+  { id: 'nlm-mindmap',     label: '마인드맵',    icon: '⊛',  desc: '마인드맵 시각화 생성',         color: '#ab47bc', type: 'nlm', ext: 'html', app: 'Safari',
+    detail: '내용의 개념과 관계를 마인드맵으로 시각화합니다. 브라우저에서 열 수 있는 인터랙티브 HTML 파일로 저장됩니다.' },
 ]
 
 // 전체 스킬 (기존 코드 호환용)
@@ -223,6 +242,30 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-5 py-4">
+
+          {/* ── 스킬 설명 카드 ── */}
+          {skill.detail && state !== 'setup-required' && (
+            <div className="flex items-start gap-3 p-3 rounded-xl border mb-4 flex-shrink-0"
+              style={{ background: skill.color + '08', borderColor: skill.color + '25' }}>
+              <div className="w-6 h-6 rounded-md flex items-center justify-center text-xs flex-shrink-0 mt-0.5"
+                style={{ background: skill.color + '20', color: skill.color }}>
+                {skill.icon}
+              </div>
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold mb-0.5" style={{ color: skill.color }}>{skill.label}</p>
+                <p className="text-[11px] text-[#7a7c98] leading-relaxed">{skill.detail}</p>
+                {isNlm && (
+                  <div className="flex items-center gap-1 mt-1.5">
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-full font-medium"
+                      style={{ background: '#4285f415', color: '#4285f4', border: '1px solid #4285f430' }}>
+                      Google NotebookLM
+                    </span>
+                    <span className="text-[9px] text-[#3a3c50]">· 처리에 수분 소요</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* ── 설치/로그인 안내 ── */}
           {state === 'setup-required' && setupStatus && (
