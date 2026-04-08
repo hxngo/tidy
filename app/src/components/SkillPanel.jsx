@@ -283,29 +283,7 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
 
               {/* 메시지 목록 */}
               {chatMessages.map((msg, i) => (
-                <div key={i} className={`flex flex-col gap-1 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                  <span className="text-[9px] text-[#3a3c50] px-1">
-                    {msg.role === 'user' ? '원문' : msg.role === 'error' ? '오류' : '번역'}
-                  </span>
-                  <div className={`max-w-[90%] rounded-2xl px-3.5 py-2.5 text-[12px] leading-relaxed whitespace-pre-wrap ${
-                    msg.role === 'user'
-                      ? 'bg-[#0ea5e9]/15 text-[#7dd3fc] rounded-tr-sm border border-[#0ea5e9]/20'
-                      : msg.role === 'error'
-                      ? 'bg-red-900/20 text-red-400 border border-red-800/30 rounded-tl-sm'
-                      : 'bg-[#14151e] text-[#d0d2e4] rounded-tl-sm border border-[#1c1e2c]'
-                  }`}>
-                    {msg.text}
-                  </div>
-                  {/* 번역 결과 복사 버튼 */}
-                  {msg.role === 'ai' && (
-                    <button
-                      onClick={() => navigator.clipboard.writeText(msg.text)}
-                      className="text-[9px] text-[#3a3c50] hover:text-[#6b6e8c] px-1 transition-colors"
-                    >
-                      복사
-                    </button>
-                  )}
-                </div>
+                <ChatMessage key={i} msg={msg} />
               ))}
 
               {/* 로딩 중 */}
@@ -585,6 +563,62 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
         )}
       </div>
     </>
+  )
+}
+
+// ─── 번역 채팅 말풍선 ─────────────────────────────────────────
+function ChatMessage({ msg }) {
+  const [copied, setCopied] = useState(false)
+
+  function handleCopy() {
+    navigator.clipboard.writeText(msg.text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  return (
+    <div className={`flex flex-col gap-1 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+      <span className="text-[9px] text-[#3a3c50] px-1">
+        {msg.role === 'user' ? '원문' : msg.role === 'error' ? '오류' : '번역'}
+      </span>
+      <div className={`max-w-[90%] rounded-2xl px-3.5 py-2.5 text-[12px] leading-relaxed whitespace-pre-wrap ${
+        msg.role === 'user'
+          ? 'bg-[#0ea5e9]/15 text-[#7dd3fc] rounded-tr-sm border border-[#0ea5e9]/20'
+          : msg.role === 'error'
+          ? 'bg-red-900/20 text-red-400 border border-red-800/30 rounded-tl-sm'
+          : 'bg-[#14151e] text-[#d0d2e4] rounded-tl-sm border border-[#1c1e2c]'
+      }`}>
+        {msg.text}
+      </div>
+      {/* 복사 버튼 (번역 결과 & 원문 모두) */}
+      {msg.role !== 'error' && (
+        <button
+          onClick={handleCopy}
+          className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md transition-all ${
+            copied
+              ? 'text-emerald-400 bg-emerald-500/10'
+              : 'text-[#3a3c50] hover:text-[#9a9cb8] hover:bg-[#1a1c28]'
+          }`}
+        >
+          {copied ? (
+            <>
+              <svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M2 8l4 4 8-7"/>
+              </svg>
+              복사됨
+            </>
+          ) : (
+            <>
+              <svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="5" y="5" width="9" height="9" rx="1"/>
+                <path d="M11 5V3a1 1 0 00-1-1H3a1 1 0 00-1 1v7a1 1 0 001 1h2"/>
+              </svg>
+              복사
+            </>
+          )}
+        </button>
+      )}
+    </div>
   )
 }
 
