@@ -624,6 +624,16 @@ function renderInline(text) {
   })
 }
 
+// ─── 배열 셔플 (Fisher-Yates) ─────────────────────────────────
+function shuffleArray(arr) {
+  const a = [...arr]
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]]
+  }
+  return a
+}
+
 // ─── 퀴즈 파서 ───────────────────────────────────────────────
 // NotebookLM 실제 출력 포맷:
 //   ## Question N
@@ -690,10 +700,13 @@ function parseQuiz(markdown) {
 
     const questionText = questionLines.join(' ').trim()
     if (questionText && options.length >= 2 && correctIndex >= 0) {
+      const correctText = options[correctIndex]
+      const shuffled = shuffleArray(options)
+      const newCorrectIndex = shuffled.indexOf(correctText)
       questions.push({
         question: questionText,
-        options: options.map((t, i) => ({ letter: LETTERS[i], text: t })),
-        answer: LETTERS[correctIndex],
+        options: shuffled.map((t, i) => ({ letter: LETTERS[i], text: t })),
+        answer: LETTERS[newCorrectIndex],
         explanation: hint,
       })
     }
@@ -727,10 +740,13 @@ function parseQuiz(markdown) {
       }
       const questionText = questionLines.join(' ').trim()
       if (questionText && options.length >= 2 && correctIndex >= 0) {
+        const correctText = options[correctIndex]
+        const shuffled = shuffleArray(options)
+        const newCorrectIndex = shuffled.indexOf(correctText)
         questions.push({
           question: questionText,
-          options: options.map((t, i) => ({ letter: ['A','B','C','D'][i], text: t })),
-          answer: ['A','B','C','D'][correctIndex],
+          options: shuffled.map((t, i) => ({ letter: ['A','B','C','D'][i], text: t })),
+          answer: ['A','B','C','D'][newCorrectIndex],
           explanation: hint,
         })
       }
