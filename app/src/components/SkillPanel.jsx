@@ -46,8 +46,10 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
   const [setupStatus, setSetupStatus] = useState(null)    // { step, message, python }
   const [installLog, setInstallLog] = useState('')
   const [installing, setInstalling] = useState(false)
+  const [elapsed, setElapsed] = useState(0)  // 경과 시간 (초)
   const prevSkillRef = useRef(null)
   const progressUnsubRef = useRef(null)
+  const elapsedTimerRef = useRef(null)
 
   const skill = skillById(skillId)
   const isNlm = skill.type === 'nlm'
@@ -67,6 +69,11 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
     setSetupStatus(null)
     setCopied(false)
     setSaved(false)
+    setElapsed(0)
+    clearInterval(elapsedTimerRef.current)
+    if (isNlm) {
+      elapsedTimerRef.current = setInterval(() => setElapsed(s => s + 1), 1000)
+    }
 
     if (isNlm) {
       // NotebookLM 스킬 — 먼저 설치 상태 확인
@@ -119,12 +126,20 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
     }
   }, [open, skillId, input, sourceItemId])
 
+  // 완료/오류 시 타이머 정지
+  useEffect(() => {
+    if (state !== 'running') {
+      clearInterval(elapsedTimerRef.current)
+    }
+  }, [state])
+
   // 패널 닫히면 리셋
   useEffect(() => {
     if (!open) {
       prevSkillRef.current = null
       progressUnsubRef.current?.()
       progressUnsubRef.current = null
+      clearInterval(elapsedTimerRef.current)
     }
   }, [open])
 
@@ -237,12 +252,19 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
           {state === 'running' && isNlm && (
             <div className="flex flex-col gap-4 py-4">
               <div className="flex items-center gap-3 mb-2">
-                <div className="w-8 h-8 rounded-full flex items-center justify-center animate-spin"
+                <div className="w-8 h-8 rounded-full flex items-center justify-center animate-spin flex-shrink-0"
                   style={{ border: `2px solid ${skill.color}30`, borderTopColor: skill.color }}>
                 </div>
-                <div>
+                <div className="flex-1 min-w-0">
                   <p className="text-[12px] font-medium text-[#c0c2d8]">NotebookLM 처리 중</p>
-                  <p className="text-[11px] text-[#505272]">완료까지 30초~수분 소요될 수 있습니다</p>
+                  <p className="text-[11px] text-[#505272]">Google 서버에서 AI가 처리 중입니다 — 수분 소요</p>
+                </div>
+                {/* 경과 시간 */}
+                <div className="flex-shrink-0 text-right">
+                  <p className="text-[14px] font-mono font-semibold" style={{ color: elapsed > 120 ? '#f59e0b' : '#505272' }}>
+                    {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}
+                  </p>
+                  <p className="text-[9px] text-[#3a3c50]">경과</p>
                 </div>
               </div>
 
@@ -267,15 +289,28 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
                     }`}>
                       {isDone ? '✓' : stepNum}
                     </div>
-                    <span className={`text-[12px] transition-colors ${
+                    <span className={`text-[12px] transition-colors flex-1 ${
                       isDone ? 'text-[#505272] line-through' :
                       isActive ? 'text-[#d0d2e4]' : 'text-[#3a3c50]'
                     }`}>
                       {nlmProgress?.step === stepNum ? nlmProgress.progress : step}
                     </span>
+                    {isActive && (
+                      <span className="text-[10px] text-[#505272] flex-shrink-0 animate-pulse">진행 중</span>
+                    )}
                   </div>
                 )
               })}
+
+              {/* 오래 걸릴 때 안내 */}
+              {elapsed > 60 && (
+                <div className="rounded-lg bg-[#1a1c28] px-3 py-2 mt-1">
+                  <p className="text-[10px] text-[#505272] leading-relaxed">
+                    💡 NotebookLM은 Google 서버에서 브라우저 자동화로 처리되어 시간이 걸립니다.
+                    {elapsed > 180 && ' 조금만 더 기다려 주세요.'}
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
