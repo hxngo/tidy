@@ -29,170 +29,54 @@ def log(data):
 
 
 def mindmap_to_html(json_path, html_path):
-    """NotebookLM 마인드맵 JSON → D3.js 라디얼 트리 시각화"""
+    """NotebookLM 마인드맵 JSON → Markmap 시각화"""
     with open(json_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
 
-    data_str = json.dumps(data, ensure_ascii=False)
+    # JSON → Markdown 아웃라인 변환
+    def to_markdown(node, depth=1):
+        if not node or not isinstance(node, dict):
+            return ''
+        text = (node.get('text') or node.get('title') or node.get('name') or node.get('label') or '').strip()
+        children = node.get('children') or node.get('nodes') or node.get('items') or []
+        lines = []
+        if text:
+            lines.append('#' * min(depth, 6) + ' ' + text)
+        for child in children:
+            lines.append(to_markdown(child, depth + 1))
+        return '\n'.join(filter(None, lines))
+
+    raw_root = data.get('root') or data.get('mind_map') or data
+    if isinstance(raw_root, list):
+        raw_root = {'children': raw_root}
+    markdown = to_markdown(raw_root)
 
     html = f"""<!DOCTYPE html>
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>마인드맵</title>
-<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/markmap-autoloader@0.16"></script>
 <style>
-  * {{ margin:0; padding:0; box-sizing:border-box; }}
-  body {{
-    background: #0f1018;
-    width: 100vw; height: 100vh;
-    overflow: hidden;
-    font-family: -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif;
-  }}
-  svg {{ width:100%; height:100%; }}
-  .link {{
-    fill: none;
-    stroke-width: 1.5;
-    stroke-opacity: 0.35;
-  }}
-  .node circle {{
-    cursor: pointer;
-    transition: all 0.2s ease;
-  }}
-  .node circle:hover {{ stroke-opacity: 1 !important; stroke-width: 2.5 !important; }}
-  .node text {{
-    pointer-events: none;
-    font-size: 11.5px;
-    fill: #d0d2e8;
-    letter-spacing: -0.01em;
-  }}
-  .node.root text {{
-    font-size: 14px;
-    font-weight: 700;
-    fill: #ffffff;
-  }}
-  .hint {{
-    position: fixed;
-    bottom: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    font-size: 11px;
-    color: #2a2c40;
-    letter-spacing: 0.05em;
-    pointer-events: none;
-  }}
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  html, body {{ width: 100%; height: 100%; background: #0f1018; }}
+  .markmap {{ width: 100vw; height: 100vh; }}
 </style>
 </head>
 <body>
-<svg id="svg"></svg>
-<div class="hint">스크롤: 확대/축소 · 드래그: 이동 · 노드 클릭: 접기/펼치기</div>
-<script>
-const RAW = {data_str};
-
-const BRANCH_COLORS = [
-  '#4285f4','#ea4335','#fbbc04','#34a853',
-  '#ff6d00','#ab47bc','#00bcd4','#e91e63',
-  '#8bc34a','#ff7043','#26c6da','#7e57c2',
-];
-
-// 다양한 JSON 구조 정규화
-function normalize(node) {{
-  if (!node || typeof node !== 'object') return {{ name: String(node || ''), children: [] }};
-  const name = (node.text || node.title || node.name || node.label || '').trim();
-  const rawKids = node.children || node.nodes || node.items || [];
-  return {{ name, children: Array.isArray(rawKids) ? rawKids.map(normalize).filter(n => n.name) : [] }};
-}}
-
-const rawRoot = RAW.root || RAW.mind_map || RAW;
-const treeData = normalize(Array.isArray(rawRoot) ? {{ children: rawRoot }} : rawRoot);
-
-const W = window.innerWidth, H = window.innerHeight;
-const R = Math.min(W, H) * 0.42;
-
-const svg = d3.select('#svg').attr('viewBox', [-W/2, -H/2, W, H]);
-const g = svg.append('g');
-
-svg.call(d3.zoom().scaleExtent([0.15, 5])
-  .on('zoom', e => g.attr('transform', e.transform)));
-
-function radialPt(x, y) {{
-  return [(+y) * Math.cos(x - Math.PI/2), (+y) * Math.sin(x - Math.PI/2)];
-}}
-
-function draw(data) {{
-  g.selectAll('*').remove();
-
-  const hier = d3.hierarchy(data);
-  d3.tree().size([2 * Math.PI, R])
-    .separation((a,b) => (a.parent===b.parent ? 1 : 2.2) / a.depth)(hier);
-
-  // 브랜치별 색상 배정
-  (hier.children || []).forEach((child, i) => {{
-    const c = BRANCH_COLORS[i % BRANCH_COLORS.length];
-    child.each(d => d.color = c);
-  }});
-  hier.color = '#ffffff';
-
-  // 링크
-  g.append('g').selectAll('path')
-    .data(hier.links())
-    .join('path')
-    .attr('class', 'link')
-    .attr('stroke', d => d.target.color || '#4285f4')
-    .attr('d', d3.linkRadial().angle(d => d.x).radius(d => d.y));
-
-  // 노드
-  const node = g.append('g').selectAll('g')
-    .data(hier.descendants())
-    .join('g')
-    .attr('class', d => 'node' + (d.depth===0 ? ' root' : ''))
-    .attr('transform', d => `translate(${{radialPt(d.x, d.y)}})`)
-    .on('click', (e, d) => {{
-      e.stopPropagation();
-      if (d.depth === 0) return;
-      if (d.children) {{ d._children = d.children; d.children = null; }}
-      else if (d._children) {{ d.children = d._children; d._children = null; }}
-      draw(data);
-    }});
-
-  const rScale = d => d.depth===0 ? 30 : d.depth===1 ? 12 : d.depth===2 ? 7 : 5;
-
-  // 원형 노드
-  node.append('circle')
-    .attr('r', rScale)
-    .attr('fill', d => d.depth===0 ? '#1a1c2e'
-      : d.depth===1 ? (d.color+'33')
-      : (d.color+'1a'))
-    .attr('stroke', d => d.color || '#4285f4')
-    .attr('stroke-width', d => d.depth<=1 ? 2 : 1.5)
-    .attr('stroke-opacity', d => d.depth===0 ? 0.8 : 0.7);
-
-  // 텍스트
-  node.append('text')
-    .attr('transform', d => {{
-      if (d.depth===0) return '';
-      const deg = d.x * 180/Math.PI - 90;
-      const flip = d.x >= Math.PI;
-      return `rotate(${{flip ? deg+180 : deg}})`;
-    }})
-    .attr('x', d => {{
-      if (d.depth===0) return 0;
-      const right = d.x < Math.PI;
-      return (right ? 1 : -1) * (rScale(d) + 6);
-    }})
-    .attr('text-anchor', d => {{
-      if (d.depth===0) return 'middle';
-      return d.x < Math.PI ? 'start' : 'end';
-    }})
-    .attr('dy', '0.35em')
-    .style('font-size', d => d.depth===0 ? '14px' : d.depth===1 ? '12px' : '11px')
-    .style('font-weight', d => d.depth<=1 ? '600' : '400')
-    .style('fill', d => d.depth===0 ? '#fff' : d.depth===1 ? (d.color||'#e0e0f0') : '#c0c2d8')
-    .text(d => d.data.name.length > 28 ? d.data.name.slice(0,27)+'…' : d.data.name);
-}}
-
-draw(treeData);
+<div class="markmap">
+<script type="text/template">
+---
+markmap:
+  colorFreezeLevel: 2
+  initialExpandLevel: 3
+  zoom: true
+  pan: true
+---
+{markdown}
 </script>
+</div>
 </body>
 </html>"""
 
