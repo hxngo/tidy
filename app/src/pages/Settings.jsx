@@ -288,20 +288,20 @@ export default function Settings({ embedded = false }) {
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-lg mx-auto px-6 py-5 space-y-6">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden">
+        <div className="w-full max-w-lg mx-auto px-6 py-5 space-y-6">
 
           {/* ── AI 탭 ── */}
           {tab === 'ai' && (
             <>
               <div>
-                <div className="flex items-center justify-between mb-3">
-                  <div>
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <div className="flex-1 min-w-0">
                     <h2 className="text-sm font-semibold text-[#e5e5e5]">Claude AI</h2>
                     <p className="text-xs text-[#737373] mt-0.5">메시지 분류·요약·태스크 추출에 사용됩니다</p>
                   </div>
                   {settings.hasAnthropicKey && (
-                    <span className="text-xs text-green-400 bg-green-900/20 px-2 py-1 rounded-full border border-green-700/30">✓ 연결됨</span>
+                    <span className="text-xs text-green-400 bg-green-900/20 px-2 py-1 rounded-full border border-green-700/30 flex-shrink-0">✓ 연결됨</span>
                   )}
                 </div>
                 <form onSubmit={handleSaveApiKey} className="space-y-3">
@@ -369,8 +369,8 @@ export default function Settings({ embedded = false }) {
             <div className="space-y-4">
               {/* Gmail */}
               <div className="border border-[#2a2a2a] rounded-xl overflow-hidden">
-                <div className="flex items-center justify-between px-4 py-3 bg-[#141414]">
-                  <div className="flex items-center gap-2.5">
+                <div className="flex items-center justify-between gap-3 px-4 py-3 bg-[#141414]">
+                  <div className="flex items-center gap-2.5 flex-1 min-w-0">
                     <IconMail size={16} className="text-[#737373]" />
                     <div>
                       <p className="text-sm font-medium text-[#e5e5e5]">Gmail</p>
@@ -435,8 +435,8 @@ export default function Settings({ embedded = false }) {
 
               {/* Slack */}
               <div className="border border-[#2a2a2a] rounded-xl overflow-hidden">
-                <div className="flex items-center justify-between px-4 py-3 bg-[#141414]">
-                  <div className="flex items-center gap-2.5">
+                <div className="flex items-center justify-between gap-3 px-4 py-3 bg-[#141414]">
+                  <div className="flex items-center gap-2.5 flex-1 min-w-0">
                     <span className="text-base">#</span>
                     <div>
                       <p className="text-sm font-medium text-[#e5e5e5]">Slack</p>
@@ -654,8 +654,8 @@ export default function Settings({ embedded = false }) {
                 <p className="text-xs text-[#737373] mb-3">미팅·약속·마감이 감지되면 macOS 캘린더에 자동으로 추가합니다</p>
 
                 <form onSubmit={handleSaveCalendar} className="space-y-3">
-                  <div className="flex items-center justify-between py-1">
-                    <span className="text-sm text-[#e5e5e5]">캘린더 자동 등록</span>
+                  <div className="flex items-center justify-between gap-3 py-1">
+                    <span className="text-sm text-[#e5e5e5] flex-1 min-w-0">캘린더 자동 등록</span>
                     <Toggle
                       value={settings.calendarEnabled}
                       onChange={() => setSettings((prev) => ({ ...prev, calendarEnabled: !prev.calendarEnabled }))}
@@ -721,8 +721,8 @@ export default function Settings({ embedded = false }) {
                   </div>
 
                   {/* iMessage는 별도 opt-in */}
-                  <div className="flex items-center justify-between p-3 bg-[#141414] border border-[#2a2a2a] rounded-lg mt-2">
-                    <div>
+                  <div className="flex items-center justify-between gap-3 p-3 bg-[#141414] border border-[#2a2a2a] rounded-lg mt-2">
+                    <div className="flex-1 min-w-0">
                       <p className="text-sm text-[#e5e5e5]">iMessage</p>
                       <p className="text-xs text-[#404040]">Apple 메시지 앱 (메시지 DB 직접 접근)</p>
                     </div>
