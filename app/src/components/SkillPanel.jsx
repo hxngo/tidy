@@ -24,7 +24,7 @@ export const NLM_SKILLS = [
   { id: 'nlm-flashcards',  label: '플래시카드',  icon: '⊟',  desc: '암기 카드 생성',              color: '#ff6d00', type: 'nlm', ext: 'md',   app: 'TextEdit' },
   { id: 'nlm-datatable',   label: '데이터 표',   icon: '⊞',  desc: '구조화된 CSV 표 생성',        color: '#0f9d58', type: 'nlm', ext: 'csv',  app: 'Numbers' },
   { id: 'nlm-report',      label: '브리핑 문서', icon: '≡',  desc: '브리핑 Markdown 문서 생성',    color: '#4285f4', type: 'nlm', ext: 'md',   app: 'TextEdit' },
-  { id: 'nlm-mindmap',     label: '마인드맵',    icon: '⊛',  desc: '마인드맵 JSON 생성',           color: '#ab47bc', type: 'nlm', ext: 'json', app: 'TextEdit' },
+  { id: 'nlm-mindmap',     label: '마인드맵',    icon: '⊛',  desc: '마인드맵 시각화 생성',          color: '#ab47bc', type: 'nlm', ext: 'html', app: 'Safari' },
 ]
 
 // 전체 스킬 (기존 코드 호환용)

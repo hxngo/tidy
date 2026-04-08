@@ -21,11 +21,89 @@ SKILL_CONFIG = {
     'nlm-flashcards':  {'generate': 'flashcards',   'download': 'flashcards',  'ext': 'md',   'label': '플래시카드',   'timeout': 300,  'source_timeout': 120, 'dl_kwargs': {'output_format': 'markdown'}},
     'nlm-datatable':   {'generate': 'data_table',   'download': 'data_table',  'ext': 'csv',  'label': '데이터 표',    'timeout': 300,  'source_timeout': 120},
     'nlm-report':      {'generate': 'report',       'download': 'report',      'ext': 'md',   'label': '브리핑 문서',  'timeout': 300,  'source_timeout': 120},
-    'nlm-mindmap':     {'generate': 'mind_map',     'download': 'mind_map',    'ext': 'json', 'label': '마인드맵',     'timeout': 300,  'source_timeout': 120, 'no_wait': True},
+    'nlm-mindmap':     {'generate': 'mind_map',     'download': 'mind_map',    'ext': 'html', 'label': '마인드맵',     'timeout': 300,  'source_timeout': 120, 'no_wait': True, 'post': 'mindmap_to_html'},
 }
 
 def log(data):
     print(json.dumps(data, ensure_ascii=False), flush=True)
+
+
+def mindmap_to_html(json_path, html_path):
+    """NotebookLM 마인드맵 JSON → 브라우저용 HTML 시각화 변환"""
+    with open(json_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+
+    # 루트 노드 추출 (구조 유연하게 처리)
+    root = data
+    if isinstance(data, dict):
+        root = data.get('root') or data.get('mind_map') or data.get('nodes') or data
+
+    def to_html_tree(node, depth=1):
+        if isinstance(node, str):
+            return f'<div class="node d{min(depth,5)}"><span>{node}</span></div>'
+        if not isinstance(node, dict):
+            return ''
+        text = node.get('text') or node.get('title') or node.get('name') or node.get('label') or ''
+        children = node.get('children') or node.get('nodes') or node.get('items') or []
+        child_html = ''.join(to_html_tree(c, depth + 1) for c in children)
+        children_div = f'<div class="children">{child_html}</div>' if child_html else ''
+        toggle = ' data-toggle="true"' if children else ''
+        return f'<div class="node d{min(depth,5)}"{toggle}><span>{text}</span>{children_div}</div>'
+
+    tree_html = to_html_tree(root if isinstance(root, dict) else {'children': root})
+
+    html = f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>마인드맵</title>
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ background: #0d0e16; color: #e0e0f0; font-family: -apple-system, "Helvetica Neue", sans-serif; padding: 32px 24px; min-height: 100vh; }}
+  h1 {{ font-size: 13px; font-weight: 500; color: #3a3c58; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 28px; }}
+  .node {{ position: relative; padding: 4px 0; }}
+  .node > span {{
+    display: inline-block; padding: 5px 14px; border-radius: 20px;
+    font-size: 13px; line-height: 1.4; cursor: default;
+    transition: opacity 0.15s;
+  }}
+  .node[data-toggle] > span {{ cursor: pointer; }}
+  .node[data-toggle] > span:hover {{ opacity: 0.8; }}
+  .d1 > span {{ background: #4285f4; color: #fff; font-size: 16px; font-weight: 700; padding: 8px 20px; border-radius: 24px; }}
+  .d2 > span {{ background: #1a237e; color: #9ab4f8; border: 1px solid #3949ab; }}
+  .d3 > span {{ background: #1b2a1b; color: #81c784; border: 1px solid #2e7d32; }}
+  .d4 > span {{ background: #1a1a2e; color: #ce93d8; border: 1px solid #6a1b9a; font-size: 12px; }}
+  .d5 > span {{ background: #1a1c28; color: #8082a0; border: 1px solid #2a2c40; font-size: 11px; }}
+  .children {{
+    margin-left: 28px;
+    padding-left: 16px;
+    border-left: 1px solid #1e2030;
+    margin-top: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }}
+  .collapsed > .children {{ display: none; }}
+  .node[data-toggle] > span::before {{ content: "▾ "; font-size: 10px; opacity: 0.5; }}
+  .collapsed[data-toggle] > span::before {{ content: "▸ "; }}
+</style>
+</head>
+<body>
+<h1>NotebookLM · 마인드맵</h1>
+{tree_html}
+<script>
+  document.querySelectorAll('[data-toggle]').forEach(el => {{
+    el.querySelector(':scope > span').addEventListener('click', () => {{
+      el.classList.toggle('collapsed');
+    }});
+  }});
+</script>
+</body>
+</html>"""
+
+    with open(html_path, 'w', encoding='utf-8') as f:
+        f.write(html)
 
 
 async def main():
@@ -92,9 +170,17 @@ async def main():
                 os.makedirs(output_dir, exist_ok=True)
                 out_path = os.path.join(output_dir, f'tidy-{skill_id}.{cfg["ext"]}')
 
-                dl_fn = getattr(client.artifacts, f'download_{cfg["download"]}')
-                dl_kwargs = cfg.get('dl_kwargs', {})
-                await dl_fn(nb_id, out_path, **dl_kwargs)
+                # 마인드맵은 JSON으로 먼저 받은 뒤 HTML로 변환
+                if cfg.get('post') == 'mindmap_to_html':
+                    json_path = out_path.replace('.html', '.json')
+                    dl_fn = getattr(client.artifacts, f'download_{cfg["download"]}')
+                    await dl_fn(nb_id, json_path)
+                    mindmap_to_html(json_path, out_path)
+                    os.remove(json_path)  # 원본 JSON 삭제
+                else:
+                    dl_fn = getattr(client.artifacts, f'download_{cfg["download"]}')
+                    dl_kwargs = cfg.get('dl_kwargs', {})
+                    await dl_fn(nb_id, out_path, **dl_kwargs)
 
                 log({'done': True, 'path': out_path, 'ext': cfg['ext'], 'label': cfg['label']})
 

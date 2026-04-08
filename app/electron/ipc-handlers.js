@@ -1549,6 +1549,7 @@ function setupIpcHandlers(ipcMain, getWindow) {
       md:   'TextEdit',
       csv:  'Numbers',
       json: 'TextEdit',
+      html: 'Safari',
     }
 
     try {
