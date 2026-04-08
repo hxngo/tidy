@@ -60,7 +60,7 @@ def mindmap_to_html(json_path, html_path):
 <script src="https://cdn.jsdelivr.net/npm/markmap-autoloader@0.16"></script>
 <style>
   * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-  html, body {{ width: 100%; height: 100%; background: #0f1018; }}
+  html, body {{ width: 100%; height: 100%; background: #ffffff; }}
   .markmap {{ width: 100vw; height: 100vh; }}
 </style>
 </head>
