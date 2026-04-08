@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
+import { MarkdownOutput } from './SkillPanel'
 
 function Tooltip({ label, shortcut, children }) {
   const [visible, setVisible] = useState(false)
@@ -408,68 +409,120 @@ export default function TopBar({ syncStatus = {}, newCount = 0, onNavigateToItem
 
       {/* Weekly Report Modal */}
       {showReport && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm"
-          onClick={() => setShowReport(false)}
-        >
-          <div
-            className="bg-[#0f1018] border border-[#1c1e2a] rounded-2xl w-full max-w-2xl max-h-[80vh] flex flex-col shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between px-5 pt-4 pb-3.5 border-b border-[#181a26] flex-shrink-0">
-              <div className="flex items-center gap-2.5">
-                <span className="text-[#c8c8d0]">{Ic.chart}</span>
-                <h3 className="text-[13px] font-semibold text-[#e0e0f0] tracking-[-0.01em]">주간 리포트</h3>
-              </div>
-              <button
-                onClick={() => setShowReport(false)}
-                className="text-[#6b6e8c] hover:text-[#b0b2cc] transition-colors p-1 rounded"
-              >
-                {Ic.close}
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto px-5 py-4">
-              {reportState.loading ? (
-                <div className="flex flex-col items-center justify-center h-32 gap-3">
-                  <div className="flex gap-1.5">
-                    {[0, 1, 2].map((i) => (
-                      <div
-                        key={i}
-                        className="w-1.5 h-1.5 rounded-full bg-[#d4d4d8] animate-pulse"
-                        style={{ animationDelay: `${i * 160}ms` }}
-                      />
-                    ))}
-                  </div>
-                  <p className="text-xs text-[#8082a0]">AI가 주간 리포트를 작성하는 중…</p>
-                </div>
-              ) : (
-                <pre className="text-xs text-[#a0a2bc] whitespace-pre-wrap leading-relaxed font-sans">
-                  {reportState.report}
-                </pre>
-              )}
-            </div>
-
-            {reportState.report && (
-              <div className="px-5 py-3 border-t border-[#181a26] flex-shrink-0 flex gap-3">
-                <button
-                  onClick={() => navigator.clipboard.writeText(reportState.report)}
-                  className="text-xs text-[#c8c8d0] hover:text-[#818cf8] transition-colors"
-                >
-                  복사
-                </button>
-                <button
-                  onClick={handleWeeklyReport}
-                  className="text-xs text-[#6b6e8c] hover:text-[#9a9cb8] transition-colors"
-                >
-                  다시 생성
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
+        <WeeklyReportModal
+          reportState={reportState}
+          onClose={() => setShowReport(false)}
+          onRefresh={handleWeeklyReport}
+        />
       )}
     </>
+  )
+}
+
+// ─── 주간 리포트 모달 ─────────────────────────────────────────
+function WeeklyReportModal({ reportState, onClose, onRefresh }) {
+  const [copied, setCopied] = useState(false)
+
+  function handleCopy() {
+    navigator.clipboard.writeText(reportState.report)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  // 오늘 날짜 기준 주 범위
+  const now = new Date()
+  const day = now.getDay()
+  const monday = new Date(now)
+  monday.setDate(now.getDate() - ((day + 6) % 7))
+  const sunday = new Date(monday)
+  sunday.setDate(monday.getDate() + 6)
+  const fmt = (d) => `${d.getMonth() + 1}/${d.getDate()}`
+  const weekRange = `${fmt(monday)} – ${fmt(sunday)}`
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="bg-[#0d0e16] border border-[#1c1e2c] rounded-2xl w-full max-w-2xl max-h-[82vh] flex flex-col shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 pt-4 pb-3.5 border-b border-[#1c1e2c] flex-shrink-0">
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-[#6366f1]/15 flex items-center justify-center text-[#6366f1]">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="1" y="3" width="14" height="11" rx="1.5"/>
+                <path d="M5 1v4M11 1v4M1 7h14"/>
+                <path d="M4 10h2M7 10h2M10 10h2M4 13h2M7 13h2"/>
+              </svg>
+            </div>
+            <div>
+              <h3 className="text-[13px] font-semibold text-[#e0e0f0]">주간 리포트</h3>
+              <p className="text-[10px] text-[#3a3c50]">{weekRange}</p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-md text-[#505272] hover:text-[#9a9cb8] hover:bg-[#14151e] transition-colors"
+          >
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <path d="M2 2l12 12M14 2L2 14"/>
+            </svg>
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-6 py-5">
+          {reportState.loading ? (
+            <div className="flex flex-col items-center justify-center h-40 gap-4">
+              <div className="flex gap-1.5">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="w-2 h-2 rounded-full bg-[#6366f1] animate-pulse"
+                    style={{ animationDelay: `${i * 160}ms` }} />
+                ))}
+              </div>
+              <p className="text-[12px] text-[#6b6e8c]">AI가 이번 주 활동을 분석하는 중…</p>
+            </div>
+          ) : reportState.report ? (
+            <div className="prose prose-sm prose-invert max-w-none">
+              <MarkdownOutput text={reportState.report} />
+            </div>
+          ) : null}
+        </div>
+
+        {/* Footer */}
+        {reportState.report && !reportState.loading && (
+          <div className="px-5 py-3 border-t border-[#1c1e2c] flex-shrink-0 flex items-center gap-2">
+            <button
+              onClick={handleCopy}
+              className={`flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-lg border transition-colors ${
+                copied
+                  ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
+                  : 'text-[#9a9cb8] bg-[#14151e] border-[#1c1e2c] hover:border-[#252840]'
+              }`}
+            >
+              {copied ? (
+                <><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 8l4 4 8-7"/></svg>복사됨</>
+              ) : (
+                <><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="5" width="9" height="9" rx="1"/><path d="M11 5V3a1 1 0 00-1-1H3a1 1 0 00-1 1v7a1 1 0 001 1h2"/></svg>복사</>
+              )}
+            </button>
+            <button
+              onClick={onRefresh}
+              className="flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-lg border text-[#9a9cb8] bg-[#14151e] border-[#1c1e2c] hover:border-[#252840] transition-colors"
+            >
+              <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M1 8a7 7 0 1114 0"/>
+                <path d="M15 4v4h-4"/>
+              </svg>
+              다시 생성
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 

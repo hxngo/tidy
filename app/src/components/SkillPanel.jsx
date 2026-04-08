@@ -732,7 +732,7 @@ function SetupStep({ num, title, done, active, desc, action }) {
 }
 
 // ─── 마크다운 렌더러 ──────────────────────────────────────────
-function MarkdownOutput({ text }) {
+export function MarkdownOutput({ text }) {
   const lines = text.split('\n')
   const elements = []
   let i = 0
