@@ -42,6 +42,7 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
   const [saved, setSaved] = useState(false)
   const [nlmProgress, setNlmProgress] = useState(null)   // { progress, step, total }
   const [nlmResult, setNlmResult] = useState(null)        // { path, ext, label, app }
+  const [nlmContent, setNlmContent] = useState(null)      // quiz/flashcard markdown text
   const [setupStatus, setSetupStatus] = useState(null)    // { step, message, python }
   const [installLog, setInstallLog] = useState('')
   const [installing, setInstalling] = useState(false)
@@ -62,6 +63,7 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
     setOutput('')
     setNlmProgress(null)
     setNlmResult(null)
+    setNlmContent(null)
     setSetupStatus(null)
     setCopied(false)
     setSaved(false)
@@ -84,6 +86,7 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
             unsub?.()
             if (res.success) {
               setNlmResult(res)
+              if (res.content) setNlmContent(res.content)
               setState('done-file')
             } else {
               setOutput(res.error || '알 수 없는 오류')
@@ -291,8 +294,18 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
             </div>
           )}
 
+          {/* ── NLM 퀴즈 — 인터랙티브 뷰어 ── */}
+          {state === 'done-file' && skillId === 'nlm-quiz' && nlmContent && (
+            <QuizViewer content={nlmContent} skill={skill} filePath={nlmResult?.path} />
+          )}
+
+          {/* ── NLM 플래시카드 — 인터랙티브 뷰어 ── */}
+          {state === 'done-file' && skillId === 'nlm-flashcards' && nlmContent && (
+            <FlashcardViewer content={nlmContent} skill={skill} filePath={nlmResult?.path} />
+          )}
+
           {/* ── NLM 스킬 완료 — 파일 열림 ── */}
-          {state === 'done-file' && nlmResult && (
+          {state === 'done-file' && nlmResult && skillId !== 'nlm-quiz' && skillId !== 'nlm-flashcards' && (
             <div className="flex flex-col gap-4">
               <div className="flex items-center gap-3 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
                 <div className="w-8 h-8 rounded-full bg-emerald-500/20 flex items-center justify-center flex-shrink-0">
@@ -321,18 +334,6 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
                     <path d="M10 1h5v5M15 1L8 8"/>
                   </svg>
                   다시 열기
-                </button>
-                <button
-                  onClick={() => {
-                    const { exec } = require?.('child_process') // Electron 환경 아님
-                    window.tidy?.obsidian?.open?.(nlmResult.path)
-                  }}
-                  className="flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-lg border border-[#1c1e2c] hover:border-[#252840] text-[#9a9cb8] bg-[#14151e] transition-colors"
-                >
-                  <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M2 2h5v5H2zM9 2h5v5H9zM2 9h5v5H2zM9 9h5v5H9z"/>
-                  </svg>
-                  Finder에서 보기
                 </button>
               </div>
             </div>
@@ -586,4 +587,399 @@ function renderInline(text) {
       return <em key={i} className="text-[#9a9cb8] italic">{part.slice(1, -1)}</em>
     return part
   })
+}
+
+// ─── 퀴즈 파서 ───────────────────────────────────────────────
+function parseQuiz(markdown) {
+  const questions = []
+  const text = markdown.replace(/\r\n/g, '\n')
+  // --- 구분자로 블록 분리
+  const blocks = text.split(/\n\s*---+\s*\n/)
+
+  for (const block of blocks) {
+    if (!block.trim()) continue
+    const lines = block.split('\n')
+    let questionLines = []
+    const options = []
+    let answer = ''
+    let explanation = ''
+    let section = 'question'
+
+    for (const raw of lines) {
+      const line = raw.trim()
+      if (!line) continue
+
+      // 헤더 스킵 (## 퀴즈 등)
+      if (/^#+\s*(퀴즈|Quiz)/i.test(line)) continue
+
+      // 보기: A) / A. / **A)** / ① 등
+      const optMatch = line.match(/^\*?\*?([A-Da-dㄱ-ㄹ①②③④])[.)]\*?\*?\s*(.+)/)
+      if (optMatch) {
+        const letter = optMatch[1].toUpperCase()
+        const txt = optMatch[2].replace(/\*\*/g, '').trim()
+        options.push({ letter, text: txt })
+        section = 'options'
+        continue
+      }
+
+      // 정답: **Answer: B** / **정답: B** / Answer: B
+      const ansMatch = line.match(/\*?\*?\s*(?:정답|answer)[:\s：]\s*\*?\*?\s*([A-Da-dㄱ-ㄹ①②③④①②③④])/i)
+      if (ansMatch) {
+        answer = ansMatch[1].toUpperCase()
+        section = 'answer'
+        continue
+      }
+
+      // 설명: **Explanation:** / **설명:**
+      const explMatch = line.match(/^\*?\*?\s*(?:설명|explanation)[:\s：]\s*\*?\*?\s*(.*)/i)
+      if (explMatch) {
+        explanation = explMatch[1].replace(/\*\*/g, '').trim()
+        section = 'explanation'
+        continue
+      }
+
+      if (section === 'explanation') {
+        explanation += (explanation ? ' ' : '') + line.replace(/\*\*/g, '')
+        continue
+      }
+
+      // 질문 텍스트
+      if (section === 'question') {
+        const cleaned = line
+          .replace(/^\*?\*?\d+[.)]\s*/, '')
+          .replace(/^\*?\*?(?:Question|문제)\s*\d*[.):]?\s*\*?\*?\s*/i, '')
+          .replace(/\*\*/g, '')
+          .trim()
+        if (cleaned) questionLines.push(cleaned)
+      }
+    }
+
+    const questionText = questionLines.join(' ').trim()
+    if (questionText && options.length >= 2) {
+      questions.push({ question: questionText, options, answer, explanation })
+    }
+  }
+  return questions
+}
+
+// ─── 플래시카드 파서 ─────────────────────────────────────────
+function parseFlashcards(markdown) {
+  const cards = []
+  const text = markdown.replace(/\r\n/g, '\n')
+  const blocks = text.split(/\n\s*---+\s*\n/)
+
+  for (const block of blocks) {
+    if (!block.trim()) continue
+    const lines = block.split('\n').map(l => l.trim()).filter(Boolean)
+
+    // 형식 1: **Front:** ... / **Back:** ...
+    // 형식 2: **질문:** ... / **답:** ...
+    // 형식 3: 첫 줄 = front, 나머지 = back
+    let front = ''
+    let back = ''
+    const frontRe = /^\*?\*?\s*(?:front|앞면|질문|term|개념)[:\s：]\s*\*?\*?\s*(.*)/i
+    const backRe  = /^\*?\*?\s*(?:back|뒷면|답|answer|definition|정의)[:\s：]\s*\*?\*?\s*(.*)/i
+
+    let hasFrontBack = false
+    const backLines = []
+
+    for (const line of lines) {
+      const fm = line.match(frontRe)
+      const bm = line.match(backRe)
+      if (fm) { front = fm[1].replace(/\*\*/g, '').trim(); hasFrontBack = true }
+      else if (bm) { back = bm[1].replace(/\*\*/g, '').trim(); hasFrontBack = true }
+      else if (hasFrontBack && back === '') { backLines.push(line.replace(/\*\*/g, '')) }
+    }
+
+    if (hasFrontBack) {
+      if (back === '' && backLines.length) back = backLines.join(' ')
+    } else {
+      // 형식 3: 첫 줄 = front (굵게 or 그냥), 나머지 = back
+      const nonEmpty = lines.filter(l => l)
+      if (nonEmpty.length >= 2) {
+        front = nonEmpty[0].replace(/\*\*/g, '').trim()
+        back = nonEmpty.slice(1).join(' ').replace(/\*\*/g, '').trim()
+      }
+    }
+
+    if (front && back) cards.push({ front, back })
+  }
+  return cards
+}
+
+// ─── 퀴즈 뷰어 ───────────────────────────────────────────────
+function QuizViewer({ content, skill, filePath }) {
+  const questions = parseQuiz(content)
+  const [current, setCurrent] = useState(0)
+  const [selected, setSelected] = useState(null)
+  const [answers, setAnswers] = useState([]) // { correct: bool }
+  const [finished, setFinished] = useState(false)
+
+  if (!questions.length) {
+    return (
+      <div className="text-center py-8 text-[12px] text-[#505272]">
+        퀴즈를 파싱하지 못했습니다.<br/>
+        {filePath && <span className="text-[11px] font-mono text-[#3a3c50]">{filePath}</span>}
+      </div>
+    )
+  }
+
+  const q = questions[current]
+  const total = questions.length
+  const isAnswered = selected !== null
+  const correctLetter = q?.answer?.toUpperCase()
+
+  function handleSelect(letter) {
+    if (isAnswered) return
+    setSelected(letter)
+  }
+
+  function handleNext() {
+    const isCorrect = selected?.toUpperCase() === correctLetter
+    const newAnswers = [...answers, { correct: isCorrect }]
+    setAnswers(newAnswers)
+    if (current + 1 >= total) {
+      setFinished(true)
+    } else {
+      setCurrent(c => c + 1)
+      setSelected(null)
+    }
+  }
+
+  function handleRestart() {
+    setCurrent(0)
+    setSelected(null)
+    setAnswers([])
+    setFinished(false)
+  }
+
+  const score = answers.filter(a => a.correct).length
+
+  if (finished) {
+    const pct = Math.round((score / total) * 100)
+    const grade = pct >= 90 ? '🏆 완벽!' : pct >= 70 ? '👍 잘했어요' : pct >= 50 ? '📚 복습 필요' : '💪 다시 도전'
+    return (
+      <div className="flex flex-col items-center gap-5 py-6">
+        <div className="w-20 h-20 rounded-full flex items-center justify-center text-3xl font-bold"
+          style={{ background: skill.color + '20', color: skill.color, border: `2px solid ${skill.color}40` }}>
+          {pct}%
+        </div>
+        <div className="text-center">
+          <p className="text-[15px] font-semibold text-[#e0e0f0]">{grade}</p>
+          <p className="text-[12px] text-[#6b6e8c] mt-1">{total}문제 중 {score}개 정답</p>
+        </div>
+        {/* 문제별 결과 */}
+        <div className="w-full flex flex-wrap gap-2 justify-center">
+          {answers.map((a, i) => (
+            <div key={i} className={`w-7 h-7 rounded-lg flex items-center justify-center text-[11px] font-bold ${
+              a.correct ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
+            }`}>
+              {a.correct ? '○' : '×'}
+            </div>
+          ))}
+        </div>
+        <button
+          onClick={handleRestart}
+          className="px-5 py-2 rounded-xl text-[12px] font-medium transition-colors"
+          style={{ background: skill.color + '20', color: skill.color, border: `1px solid ${skill.color}40` }}
+        >
+          다시 풀기
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      {/* 진행 표시 */}
+      <div className="flex items-center gap-3">
+        <div className="flex-1 h-1.5 bg-[#1a1c28] rounded-full overflow-hidden">
+          <div className="h-full rounded-full transition-all duration-300"
+            style={{ width: `${(current / total) * 100}%`, background: skill.color }} />
+        </div>
+        <span className="text-[11px] text-[#505272] flex-shrink-0">{current + 1} / {total}</span>
+      </div>
+
+      {/* 질문 */}
+      <div className="rounded-xl bg-[#12131e] border border-[#1c1e2c] p-4">
+        <p className="text-[13px] font-medium text-[#d0d2e4] leading-relaxed">{q.question}</p>
+      </div>
+
+      {/* 보기 */}
+      <div className="flex flex-col gap-2">
+        {q.options.map((opt) => {
+          const isSelected = selected === opt.letter
+          const isCorrect = opt.letter.toUpperCase() === correctLetter
+          let btnStyle = 'border-[#1c1e2c] bg-[#0d0e16] text-[#9a9cb8] hover:border-[#252840]'
+          if (isAnswered) {
+            if (isCorrect) btnStyle = 'border-emerald-500/50 bg-emerald-500/10 text-emerald-300'
+            else if (isSelected && !isCorrect) btnStyle = 'border-red-500/50 bg-red-500/10 text-red-300'
+            else btnStyle = 'border-[#1c1e2c] bg-[#0d0e16] text-[#505272]'
+          } else if (isSelected) {
+            btnStyle = 'border-[#4285f4]/50 bg-[#4285f4]/10 text-[#7ab3ff]'
+          }
+          return (
+            <button
+              key={opt.letter}
+              onClick={() => handleSelect(opt.letter)}
+              className={`flex items-start gap-3 w-full text-left px-3 py-2.5 rounded-xl border transition-all ${btnStyle} ${!isAnswered ? 'cursor-pointer' : 'cursor-default'}`}
+            >
+              <span className="w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold flex-shrink-0 mt-0.5"
+                style={{ background: isAnswered && isCorrect ? '#10b98120' : '#1a1c28', color: isAnswered && isCorrect ? '#10b981' : 'inherit' }}>
+                {opt.letter}
+              </span>
+              <span className="text-[12px] leading-relaxed">{opt.text}</span>
+            </button>
+          )
+        })}
+      </div>
+
+      {/* 설명 */}
+      {isAnswered && q.explanation && (
+        <div className="rounded-xl bg-[#4285f4]/8 border border-[#4285f4]/20 p-3">
+          <p className="text-[10px] text-[#4285f4] font-semibold mb-1 uppercase tracking-wider">설명</p>
+          <p className="text-[12px] text-[#8ab3e8] leading-relaxed">{q.explanation}</p>
+        </div>
+      )}
+
+      {/* 다음 버튼 */}
+      {isAnswered && (
+        <button
+          onClick={handleNext}
+          className="w-full py-2.5 rounded-xl text-[12px] font-semibold transition-colors"
+          style={{ background: skill.color + '20', color: skill.color, border: `1px solid ${skill.color}40` }}
+        >
+          {current + 1 >= total ? '결과 보기' : '다음 문제 →'}
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ─── 플래시카드 뷰어 ─────────────────────────────────────────
+function FlashcardViewer({ content, skill, filePath }) {
+  const cards = parseFlashcards(content)
+  const [current, setCurrent] = useState(0)
+  const [flipped, setFlipped] = useState(false)
+  const [known, setKnown] = useState(new Set())
+  const [finished, setFinished] = useState(false)
+
+  if (!cards.length) {
+    return (
+      <div className="text-center py-8 text-[12px] text-[#505272]">
+        플래시카드를 파싱하지 못했습니다.
+      </div>
+    )
+  }
+
+  const card = cards[current]
+  const total = cards.length
+
+  function handleKnow(isKnown) {
+    const newKnown = new Set(known)
+    if (isKnown) newKnown.add(current)
+    setKnown(newKnown)
+    if (current + 1 >= total) {
+      setFinished(true)
+    } else {
+      setCurrent(c => c + 1)
+      setFlipped(false)
+    }
+  }
+
+  function handleRestart() {
+    setCurrent(0)
+    setFlipped(false)
+    setKnown(new Set())
+    setFinished(false)
+  }
+
+  if (finished) {
+    const knownCount = known.size
+    const pct = Math.round((knownCount / total) * 100)
+    return (
+      <div className="flex flex-col items-center gap-5 py-6">
+        <div className="w-20 h-20 rounded-full flex items-center justify-center text-3xl font-bold"
+          style={{ background: skill.color + '20', color: skill.color, border: `2px solid ${skill.color}40` }}>
+          {pct}%
+        </div>
+        <div className="text-center">
+          <p className="text-[15px] font-semibold text-[#e0e0f0]">
+            {pct >= 80 ? '완벽해요! 🎉' : pct >= 50 ? '잘 하고 있어요 👍' : '조금 더 연습해요 💪'}
+          </p>
+          <p className="text-[12px] text-[#6b6e8c] mt-1">{total}장 중 {knownCount}장 알고 있음</p>
+        </div>
+        <button
+          onClick={handleRestart}
+          className="px-5 py-2 rounded-xl text-[12px] font-medium transition-colors"
+          style={{ background: skill.color + '20', color: skill.color, border: `1px solid ${skill.color}40` }}
+        >
+          처음부터
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      {/* 진행 표시 */}
+      <div className="flex items-center gap-3">
+        <div className="flex-1 h-1.5 bg-[#1a1c28] rounded-full overflow-hidden">
+          <div className="h-full rounded-full transition-all duration-300"
+            style={{ width: `${(current / total) * 100}%`, background: skill.color }} />
+        </div>
+        <span className="text-[11px] text-[#505272] flex-shrink-0">{current + 1} / {total}</span>
+      </div>
+
+      {/* 카드 */}
+      <div
+        onClick={() => setFlipped(f => !f)}
+        className="relative cursor-pointer rounded-2xl border transition-all duration-300 select-none"
+        style={{
+          minHeight: '200px',
+          border: `1px solid ${flipped ? skill.color + '40' : '#1c1e2c'}`,
+          background: flipped ? skill.color + '08' : '#12131e',
+        }}
+      >
+        <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center gap-3">
+          <span className="text-[10px] uppercase tracking-widest font-semibold"
+            style={{ color: flipped ? skill.color : '#3a3c50' }}>
+            {flipped ? '뒷면 (답)' : '앞면 (클릭하여 뒤집기)'}
+          </span>
+          <p className="text-[14px] font-medium leading-relaxed"
+            style={{ color: flipped ? '#e0e0f0' : '#b0b2cc' }}>
+            {flipped ? card.back : card.front}
+          </p>
+        </div>
+
+        {/* 뒤집기 힌트 */}
+        {!flipped && (
+          <div className="absolute bottom-3 right-3 opacity-30">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke={skill.color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M2 8c0-3.3 2.7-6 6-6s6 2.7 6 6-2.7 6-6 6"/>
+              <path d="M10 12l4 2-2-4"/>
+            </svg>
+          </div>
+        )}
+      </div>
+
+      {/* 알고 있는지 버튼 (뒤집은 후에만) */}
+      {flipped && (
+        <div className="flex gap-2">
+          <button
+            onClick={() => handleKnow(false)}
+            className="flex-1 py-2.5 rounded-xl text-[12px] font-medium border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/15 transition-colors"
+          >
+            모르겠어요
+          </button>
+          <button
+            onClick={() => handleKnow(true)}
+            className="flex-1 py-2.5 rounded-xl text-[12px] font-medium border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/15 transition-colors"
+          >
+            알고 있어요
+          </button>
+        </div>
+      )}
+    </div>
+  )
 }
