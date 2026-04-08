@@ -19,9 +19,9 @@ function Toggle({ value, onChange }) {
     <button
       type="button"
       onClick={onChange}
-      className={`relative w-10 h-5 rounded-full transition-colors flex-shrink-0 ${value ? 'bg-[#d4d4d8]' : 'bg-[#2a2a2a]'}`}
+      className={`relative w-10 h-5 rounded-full transition-colors flex-shrink-0 overflow-hidden ${value ? 'bg-[#d4d4d8]' : 'bg-[#2a2a2a]'}`}
     >
-      <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${value ? 'translate-x-5' : 'translate-x-0.5'}`} />
+      <span className={`absolute top-[2px] w-4 h-4 rounded-full bg-white transition-all duration-200 ${value ? 'left-[22px]' : 'left-[2px]'}`} />
     </button>
   )
 }
