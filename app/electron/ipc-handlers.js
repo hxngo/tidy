@@ -1476,7 +1476,20 @@ function setupIpcHandlers(ipcMain, getWindow) {
       const tmpPath = path.join(os.tmpdir(), `${safeName}.${cfg.ext}`)
 
       // CSV 스킬(예산표·KPI)은 마크다운 표 → 진짜 CSV 변환
-      const fileContent = cfg.ext === 'csv' ? markdownTableToCsv(content) : content
+      // HWP 스킬은 마크다운 잔여 문법 제거
+      let fileContent = content
+      if (cfg.ext === 'csv') {
+        fileContent = markdownTableToCsv(content)
+      } else if (skillId === 'hwp') {
+        fileContent = content
+          .replace(/^#{1,6}\s+/gm, '')       // ## 헤더 제거
+          .replace(/\*\*(.+?)\*\*/g, '$1')    // **굵게** 제거
+          .replace(/\*(.+?)\*/g, '$1')        // *기울임* 제거
+          .replace(/^[-*]\s+/gm, '  - ')      // 불릿 통일
+          .replace(/`(.+?)`/g, '$1')          // `코드` 제거
+          .replace(/\n{3,}/g, '\n\n')         // 연속 빈줄 정리
+          .trim()
+      }
       fs.writeFileSync(tmpPath, fileContent, 'utf-8')
 
       // 앱이 설치된 경우 해당 앱으로, 없으면 기본 앱으로 열기
