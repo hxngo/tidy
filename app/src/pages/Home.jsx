@@ -428,10 +428,30 @@ export default function Home() {
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
           onClick={() => setSkillRunnerOpen(false)}
+          onDragEnter={(e) => e.stopPropagation()}
+          onDragOver={(e) => e.stopPropagation()}
+          onDragLeave={(e) => e.stopPropagation()}
+          onDrop={(e) => e.stopPropagation()}
         >
           <div
             className="bg-[#0f1018] border border-[#1c1e2a] rounded-2xl w-full max-w-lg shadow-2xl fade-in"
             onClick={(e) => e.stopPropagation()}
+            onDragEnter={(e) => e.stopPropagation()}
+            onDragOver={(e) => { e.stopPropagation(); e.preventDefault() }}
+            onDragLeave={(e) => e.stopPropagation()}
+            onDrop={async (e) => {
+              e.stopPropagation()
+              e.preventDefault()
+              const file = e.dataTransfer.files?.[0]
+              if (!file) return
+              const res = await window.tidy?.skills.readFile(file.path)
+              if (res?.success && res.text) {
+                setSkillRunnerText(res.text)
+                setSkillRunnerFile({ name: res.name })
+              } else {
+                alert(res?.error || '파일을 읽을 수 없습니다')
+              }
+            }}
           >
             {/* 헤더 */}
             <div className="flex items-center gap-3 px-5 py-4 border-b border-[#181a26]">
@@ -490,14 +510,21 @@ export default function Home() {
                   />
                 </div>
               </div>
-              <textarea
-                ref={skillRunnerTextRef}
-                value={skillRunnerText}
-                onChange={(e) => setSkillRunnerText(e.target.value)}
-                placeholder="텍스트를 입력하거나 붙여넣기하세요... 또는 파일을 첨부하세요"
-                rows={6}
-                className="w-full bg-[#09090c] border border-[#1a1c28] rounded-xl px-4 py-3 text-[13px] text-[#c8c8d8] placeholder-[#2a2c48] focus:outline-none focus:border-[#2e3060] resize-none leading-relaxed transition-colors"
-              />
+              <div className="relative">
+                <textarea
+                  ref={skillRunnerTextRef}
+                  value={skillRunnerText}
+                  onChange={(e) => setSkillRunnerText(e.target.value)}
+                  placeholder="텍스트를 입력하거나 붙여넣기하세요... 또는 파일을 드래그하세요"
+                  rows={6}
+                  className="w-full bg-[#09090c] border border-[#1a1c28] rounded-xl px-4 py-3 text-[13px] text-[#c8c8d8] placeholder-[#2a2c48] focus:outline-none focus:border-[#2e3060] resize-none leading-relaxed transition-colors"
+                />
+                {!skillRunnerText && (
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0">
+                    <span className="text-[11px] text-[#505272]">파일을 여기에 드래그하세요</span>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* 실행 버튼 */}
