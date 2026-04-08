@@ -9,7 +9,7 @@ const os = require('os')
 const fs = require('fs')
 
 const SCRIPT_PATH = path.join(__dirname, '../scripts/nlm_skill.py')
-const OUTPUT_DIR = path.join(os.tmpdir(), 'tidy-nlm')
+const OUTPUT_DIR = path.join(os.homedir(), 'Downloads', 'Tidy')
 
 // Python 3.10+ 경로 탐색
 function findPython() {
