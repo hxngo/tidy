@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 
 // ─── AI 스킬 (로컬, 빠름) ──────────────────────────────────────
 export const AI_SKILLS = [
@@ -54,12 +54,44 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
   const [installLog, setInstallLog] = useState('')
   const [installing, setInstalling] = useState(false)
   const [elapsed, setElapsed] = useState(0)  // 경과 시간 (초)
+  // ── 번역 채팅 상태 ──
+  const [chatMessages, setChatMessages] = useState([])   // [{role:'user'|'ai'|'error', text}]
+  const [chatInput, setChatInput] = useState('')
+  const [chatLoading, setChatLoading] = useState(false)
+  const chatEndRef = useRef(null)
+  const chatInputRef = useRef(null)
   const prevSkillRef = useRef(null)
   const progressUnsubRef = useRef(null)
   const elapsedTimerRef = useRef(null)
 
   const skill = skillById(skillId)
   const isNlm = skill.type === 'nlm'
+  const isTranslate = skillId === 'translate'
+
+  // 번역 채팅 메시지 전송
+  const sendChatMessage = useCallback(async (text) => {
+    if (!text?.trim() || chatLoading) return
+    const trimmed = text.trim()
+    setChatMessages(prev => [...prev, { role: 'user', text: trimmed }])
+    setChatInput('')
+    setChatLoading(true)
+    try {
+      const res = await window.tidy?.skills.run({ skillId: 'translate', input: trimmed })
+      if (res?.success) {
+        setChatMessages(prev => [...prev, { role: 'ai', text: res.output }])
+      } else {
+        setChatMessages(prev => [...prev, { role: 'error', text: res?.error || '번역 오류' }])
+      }
+    } catch (err) {
+      setChatMessages(prev => [...prev, { role: 'error', text: err.message }])
+    }
+    setChatLoading(false)
+  }, [chatLoading])
+
+  // 채팅 스크롤 자동 하단
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [chatMessages, chatLoading])
 
   // 스킬 실행
   useEffect(() => {
@@ -67,6 +99,15 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
     const key = `${skillId}::${input}`
     if (prevSkillRef.current === key) return
     prevSkillRef.current = key
+
+    // 번역 스킬: 채팅 모드로 초기 메시지 전송
+    if (isTranslate) {
+      setChatMessages([])
+      setChatInput('')
+      setChatLoading(false)
+      sendChatMessage(input)
+      return
+    }
 
     setState('running')
     setOutput('')
@@ -147,6 +188,9 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
       progressUnsubRef.current?.()
       progressUnsubRef.current = null
       clearInterval(elapsedTimerRef.current)
+      setChatMessages([])
+      setChatInput('')
+      setChatLoading(false)
     }
   }, [open])
 
@@ -228,8 +272,94 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
           </button>
         </div>
 
+        {/* ── 번역 채팅 모드 ── */}
+        {isTranslate && (
+          <>
+            <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-3">
+              {/* 안내 헤더 */}
+              <div className="flex items-center gap-2 pb-2 border-b border-[#1c1e2c]">
+                <span className="text-[10px] text-[#3a3c50]">한↔영 자동 감지 번역 · 계속 입력 가능</span>
+              </div>
+
+              {/* 메시지 목록 */}
+              {chatMessages.map((msg, i) => (
+                <div key={i} className={`flex flex-col gap-1 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                  <span className="text-[9px] text-[#3a3c50] px-1">
+                    {msg.role === 'user' ? '원문' : msg.role === 'error' ? '오류' : '번역'}
+                  </span>
+                  <div className={`max-w-[90%] rounded-2xl px-3.5 py-2.5 text-[12px] leading-relaxed whitespace-pre-wrap ${
+                    msg.role === 'user'
+                      ? 'bg-[#0ea5e9]/15 text-[#7dd3fc] rounded-tr-sm border border-[#0ea5e9]/20'
+                      : msg.role === 'error'
+                      ? 'bg-red-900/20 text-red-400 border border-red-800/30 rounded-tl-sm'
+                      : 'bg-[#14151e] text-[#d0d2e4] rounded-tl-sm border border-[#1c1e2c]'
+                  }`}>
+                    {msg.text}
+                  </div>
+                  {/* 번역 결과 복사 버튼 */}
+                  {msg.role === 'ai' && (
+                    <button
+                      onClick={() => navigator.clipboard.writeText(msg.text)}
+                      className="text-[9px] text-[#3a3c50] hover:text-[#6b6e8c] px-1 transition-colors"
+                    >
+                      복사
+                    </button>
+                  )}
+                </div>
+              ))}
+
+              {/* 로딩 중 */}
+              {chatLoading && (
+                <div className="flex items-start gap-2">
+                  <div className="bg-[#14151e] border border-[#1c1e2c] rounded-2xl rounded-tl-sm px-4 py-3 flex gap-1.5 items-center">
+                    {[0,1,2].map(i => (
+                      <div key={i} className="w-1.5 h-1.5 rounded-full bg-[#0ea5e9] animate-pulse"
+                        style={{ animationDelay: `${i * 180}ms` }} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div ref={chatEndRef} />
+            </div>
+
+            {/* 채팅 입력창 */}
+            <div className="px-4 pb-4 pt-2 border-t border-[#1c1e2c] flex-shrink-0">
+              <div className="flex items-end gap-2 bg-[#12131e] border border-[#1c1e2c] rounded-xl px-3 py-2 focus-within:border-[#0ea5e9]/40 transition-colors">
+                <textarea
+                  ref={chatInputRef}
+                  value={chatInput}
+                  onChange={e => setChatInput(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      sendChatMessage(chatInput)
+                    }
+                  }}
+                  placeholder="번역할 텍스트 입력 (Enter로 전송, Shift+Enter 줄바꿈)"
+                  rows={2}
+                  className="flex-1 bg-transparent text-[12px] text-[#c0c2d8] placeholder-[#3a3c50] resize-none outline-none leading-relaxed min-h-[40px] max-h-[120px]"
+                  style={{ fieldSizing: 'content' }}
+                  disabled={chatLoading}
+                />
+                <button
+                  onClick={() => sendChatMessage(chatInput)}
+                  disabled={chatLoading || !chatInput.trim()}
+                  className="flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center transition-colors disabled:opacity-30"
+                  style={{ background: chatInput.trim() && !chatLoading ? '#0ea5e9' : '#1c1e2c' }}
+                >
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14 2L2 8l5 2 2 5 5-13z"/>
+                  </svg>
+                </button>
+              </div>
+              <p className="text-[9px] text-[#2a2c3a] mt-1.5 text-right">Enter 전송 · Shift+Enter 줄바꿈</p>
+            </div>
+          </>
+        )}
+
         {/* Body */}
-        <div className="flex-1 overflow-y-auto px-5 py-4">
+        {!isTranslate && <div className="flex-1 overflow-y-auto px-5 py-4">
 
           {/* ── 스킬 설명 카드 ── */}
           {skill.detail && state !== 'setup-required' && (
@@ -404,10 +534,10 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
               </div>
             </div>
           )}
-        </div>
+        </div>}
 
-        {/* Footer — AI 스킬 완료 시만 표시 */}
-        {state === 'done' && (
+        {/* Footer — AI 스킬 완료 시만 표시 (번역 제외) */}
+        {!isTranslate && state === 'done' && (
           <div className="flex items-center gap-2 px-5 py-3.5 border-t border-[#1c1e2c] flex-shrink-0">
             <button
               onClick={handleCopy}
