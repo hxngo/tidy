@@ -13,7 +13,7 @@ import os
 SKILL_CONFIG = {
     # timeout: wait_for_completion 타임아웃 (초)
     # source_timeout: add_text wait_timeout (초)
-    'nlm-slides':      {'generate': 'slide_deck',  'download': 'slide_deck',  'ext': 'pdf',  'label': '슬라이드 덱',  'timeout': 600,  'source_timeout': 180},
+    'nlm-slides':      {'generate': 'slide_deck',  'download': 'slide_deck',  'ext': 'pptx', 'label': '슬라이드 덱',  'timeout': 600,  'source_timeout': 180},
     'nlm-audio':       {'generate': 'audio',        'download': 'audio',       'ext': 'mp3',  'label': '오디오 요약',  'timeout': 1200, 'source_timeout': 180},
     'nlm-video':       {'generate': 'video',        'download': 'video',       'ext': 'mp4',  'label': '영상 요약',    'timeout': 1800, 'source_timeout': 180},
     'nlm-infographic': {'generate': 'infographic',  'download': 'infographic', 'ext': 'png',  'label': '인포그래픽',   'timeout': 600,  'source_timeout': 180},
