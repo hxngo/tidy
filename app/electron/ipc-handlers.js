@@ -1528,8 +1528,20 @@ function setupIpcHandlers(ipcMain, getWindow) {
 
   // 스킬 실행 → 파일 생성 → 앱으로 열기
   ipcMain.handle('nlm:run-skill', async (event, { skillId, content, title }) => {
+    // pptx: PowerPoint 우선, 없으면 Keynote 폴백
+    const { execSync, exec } = require('child_process')
+
+    function appExists(appName) {
+      try {
+        execSync(`osascript -e 'id of application "${appName}"' 2>/dev/null`, { timeout: 2000 })
+        return true
+      } catch { return false }
+    }
+
+    const pptxApp = appExists('Microsoft PowerPoint') ? 'Microsoft PowerPoint' : 'Keynote'
+
     const NLM_APP_MAP = {
-      pptx: 'Keynote',
+      pptx: pptxApp,
       mp3:  'QuickTime Player',
       mp4:  'QuickTime Player',
       png:  'Preview',
@@ -1546,7 +1558,6 @@ function setupIpcHandlers(ipcMain, getWindow) {
       })
 
       // 생성된 파일을 네이티브 앱으로 열기
-      const { exec } = require('child_process')
       const appName = NLM_APP_MAP[result.ext] || 'Finder'
       exec(`open -a "${appName}" "${result.path}" 2>/dev/null || open "${result.path}"`)
 
