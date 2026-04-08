@@ -1553,7 +1553,14 @@ function setupIpcHandlers(ipcMain, getWindow) {
     }
 
     try {
-      const result = await nlm.runSkill(skillId, content, {
+      // 콘텐츠 길이 제한: 텍스트가 길수록 Google AI 처리 시간 증가
+      // 4000자 = 약 A4 2장 분량으로 충분한 컨텍스트
+      const MAX_NLM_CHARS = 4000
+      const trimmedContent = content && content.length > MAX_NLM_CHARS
+        ? content.slice(0, MAX_NLM_CHARS) + '\n\n[이하 생략]'
+        : content
+
+      const result = await nlm.runSkill(skillId, trimmedContent, {
         title: title || 'Tidy Input',
         language: 'ko',
         onProgress: (msg) => event.sender.send('nlm:progress', msg),

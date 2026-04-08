@@ -14,15 +14,16 @@ SKILL_CONFIG = {
     # timeout: asyncio.wait_for 타임아웃 (초)
     # source_timeout: add_text wait_timeout (초)
     # no_language: True → generate 호출 시 language 파라미터 미전달
-    'nlm-slides':      {'generate': 'slide_deck',  'download': 'slide_deck',  'ext': 'pptx', 'label': '슬라이드 덱',  'timeout': 600,  'source_timeout': 180},
-    'nlm-audio':       {'generate': 'audio',        'download': 'audio',       'ext': 'mp3',  'label': '오디오 요약',  'timeout': 1200, 'source_timeout': 180},
-    'nlm-video':       {'generate': 'video',        'download': 'video',       'ext': 'mp4',  'label': '영상 요약',    'timeout': 1800, 'source_timeout': 180},
-    'nlm-infographic': {'generate': 'infographic',  'download': 'infographic', 'ext': 'png',  'label': '인포그래픽',   'timeout': 900,  'source_timeout': 180},
-    'nlm-quiz':        {'generate': 'quiz',         'download': 'quiz',        'ext': 'md',   'label': '퀴즈',         'timeout': 780,  'source_timeout': 240, 'gen_timeout': 180, 'no_language': True, 'include_content': True, 'dl_kwargs': {'output_format': 'markdown'}},
-    'nlm-flashcards':  {'generate': 'flashcards',   'download': 'flashcards',  'ext': 'md',   'label': '플래시카드',   'timeout': 780,  'source_timeout': 240, 'gen_timeout': 180, 'no_language': True, 'include_content': True, 'dl_kwargs': {'output_format': 'markdown'}},
-    'nlm-datatable':   {'generate': 'data_table',   'download': 'data_table',  'ext': 'csv',  'label': '데이터 표',    'timeout': 780,  'source_timeout': 240, 'gen_timeout': 180, 'no_language': True},
-    'nlm-report':      {'generate': 'report',       'download': 'report',      'ext': 'md',   'label': '브리핑 문서',  'timeout': 780,  'source_timeout': 240, 'gen_timeout': 180, 'no_language': True},
-    'nlm-mindmap':     {'generate': 'mind_map',     'download': 'mind_map',    'ext': 'html', 'label': '마인드맵',     'timeout': 300,  'source_timeout': 120, 'no_wait': True, 'post': 'mindmap_to_html'},
+    # source_timeout: 소스 인덱싱 대기 — 4000자 이하면 보통 30~60s면 충분
+    'nlm-slides':      {'generate': 'slide_deck',  'download': 'slide_deck',  'ext': 'pptx', 'label': '슬라이드 덱',  'timeout': 600,  'source_timeout': 90},
+    'nlm-audio':       {'generate': 'audio',        'download': 'audio',       'ext': 'mp3',  'label': '오디오 요약',  'timeout': 1200, 'source_timeout': 90},
+    'nlm-video':       {'generate': 'video',        'download': 'video',       'ext': 'mp4',  'label': '영상 요약',    'timeout': 1800, 'source_timeout': 90},
+    'nlm-infographic': {'generate': 'infographic',  'download': 'infographic', 'ext': 'png',  'label': '인포그래픽',   'timeout': 900,  'source_timeout': 90},
+    'nlm-quiz':        {'generate': 'quiz',         'download': 'quiz',        'ext': 'md',   'label': '퀴즈',         'timeout': 600,  'source_timeout': 60,  'gen_timeout': 120, 'no_language': True, 'include_content': True, 'dl_kwargs': {'output_format': 'markdown'}},
+    'nlm-flashcards':  {'generate': 'flashcards',   'download': 'flashcards',  'ext': 'md',   'label': '플래시카드',   'timeout': 600,  'source_timeout': 60,  'gen_timeout': 120, 'no_language': True, 'include_content': True, 'dl_kwargs': {'output_format': 'markdown'}},
+    'nlm-datatable':   {'generate': 'data_table',   'download': 'data_table',  'ext': 'csv',  'label': '데이터 표',    'timeout': 600,  'source_timeout': 60,  'gen_timeout': 120, 'no_language': True},
+    'nlm-report':      {'generate': 'report',       'download': 'report',      'ext': 'md',   'label': '브리핑 문서',  'timeout': 600,  'source_timeout': 60,  'gen_timeout': 120, 'no_language': True},
+    'nlm-mindmap':     {'generate': 'mind_map',     'download': 'mind_map',    'ext': 'html', 'label': '마인드맵',     'timeout': 300,  'source_timeout': 60,  'no_wait': True, 'post': 'mindmap_to_html'},
 }
 
 

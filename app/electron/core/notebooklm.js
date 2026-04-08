@@ -92,19 +92,17 @@ function openLogin() {
   )
 }
 
-// 스킬별 Node.js 프로세스 타임아웃 (ms) — Python 스크립트 내부 timeout + 여유 60초
-// Node.js 프로세스 타임아웃 = Python source_timeout + completion_timeout + 여유 3분
-// quiz/flashcards/datatable/report: source(120s) + completion(600s) + 180s = 900s = 15분
+// 스킬별 Node.js 프로세스 타임아웃 (ms) = Python 총 최대시간 + 여유 2분
 const SKILL_PROCESS_TIMEOUT = {
-  'nlm-audio': 1260000,    // 21분
-  'nlm-video': 1860000,    // 31분
-  'nlm-slides': 960000,    // 16분  (source 180s + completion 600s + 180s)
-  'nlm-infographic': 1260000, // 21분 (source 180s + completion 900s + 180s)
-  'nlm-quiz': 1320000,      // 22분 (source 240s + gen 180s + completion 780s + 여유 120s)
-  'nlm-flashcards': 1320000, // 22분
-  'nlm-datatable': 1320000,  // 22분
-  'nlm-report': 1320000,     // 22분
-  'nlm-mindmap': 420000,    // 7분
+  'nlm-audio':       1500000,  // 25분
+  'nlm-video':       2100000,  // 35분
+  'nlm-slides':       900000,  // 15분 (source 90s + completion 600s + 여유 120s)
+  'nlm-infographic': 1200000,  // 20분 (source 90s + completion 900s + 여유 120s)
+  'nlm-quiz':         900000,  // 15분 (source 60s + gen 120s + completion 600s + 여유 120s)
+  'nlm-flashcards':   900000,  // 15분
+  'nlm-datatable':    900000,  // 15분
+  'nlm-report':       900000,  // 15분
+  'nlm-mindmap':      540000,  //  9분 (source 60s + completion 300s + 여유 120s)
 }
 
 // 스킬 실행 (Python 서브프로세스)
