@@ -16,7 +16,7 @@ export const AI_SKILLS = [
 
 // ─── NotebookLM 스킬 (클라우드, Google 계정 필요) ─────────────
 export const NLM_SKILLS = [
-  { id: 'nlm-slides',      label: '슬라이드',    icon: '⧉',  desc: '발표자료 PPTX 생성',          color: '#4285f4', type: 'nlm', ext: 'pptx', app: 'PowerPoint / Keynote' },
+  { id: 'nlm-slides',      label: '슬라이드',    icon: '⧉',  desc: '발표자료 PDF 생성',           color: '#4285f4', type: 'nlm', ext: 'pdf',  app: 'Preview' },
   { id: 'nlm-audio',       label: '오디오 요약', icon: '◎',  desc: '팟캐스트 형식 MP3 생성',       color: '#ea4335', type: 'nlm', ext: 'mp3',  app: 'QuickTime' },
   { id: 'nlm-video',       label: '영상 요약',   icon: '▶',  desc: '설명 영상 MP4 생성',           color: '#db4437', type: 'nlm', ext: 'mp4',  app: 'QuickTime' },
   { id: 'nlm-infographic', label: '인포그래픽',  icon: '◑',  desc: '시각화 이미지 PNG 생성',       color: '#0f9d58', type: 'nlm', ext: 'png',  app: 'Preview' },
