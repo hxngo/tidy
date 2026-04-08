@@ -1482,12 +1482,26 @@ function setupIpcHandlers(ipcMain, getWindow) {
         fileContent = markdownTableToCsv(content)
       } else if (skillId === 'hwp') {
         fileContent = content
-          .replace(/^#{1,6}\s+/gm, '')       // ## 헤더 제거
-          .replace(/\*\*(.+?)\*\*/g, '$1')    // **굵게** 제거
-          .replace(/\*(.+?)\*/g, '$1')        // *기울임* 제거
-          .replace(/^[-*]\s+/gm, '  - ')      // 불릿 통일
-          .replace(/`(.+?)`/g, '$1')          // `코드` 제거
-          .replace(/\n{3,}/g, '\n\n')         // 연속 빈줄 정리
+          // 1) 마크다운 헤더 제거 (# ~ ######)
+          .replace(/^#{1,6}\s*/gm, '')
+          // 2) 수평선 제거 (---, ***, ___)
+          .replace(/^[-*_]{3,}\s*$/gm, '')
+          // 3) 표 구분선 제거 (|---|---| 형태)
+          .replace(/^\|[\s|:=-]+\|\s*$/gm, '')
+          // 4) 표 행 → 공백 정렬 텍스트 변환 (| a | b | → a    b)
+          .replace(/^\|(.+)\|\s*$/gm, (_m, inner) =>
+            inner.split('|').map(c => c.trim()).filter(Boolean).join('    ')
+          )
+          // 5) **굵게** 제거
+          .replace(/\*\*(.+?)\*\*/g, '$1')
+          // 6) *기울임* 제거
+          .replace(/\*(.+?)\*/g, '$1')
+          // 7) `코드` 제거
+          .replace(/`([^`]+)`/g, '$1')
+          // 8) 불릿 들여쓰기 통일
+          .replace(/^[ \t]*[-*]\s+/gm, '  - ')
+          // 9) 연속 빈줄 정리
+          .replace(/\n{3,}/g, '\n\n')
           .trim()
       }
       fs.writeFileSync(tmpPath, fileContent, 'utf-8')
