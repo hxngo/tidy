@@ -590,75 +590,118 @@ function renderInline(text) {
 }
 
 // ─── 퀴즈 파서 ───────────────────────────────────────────────
+// NotebookLM 실제 출력 포맷:
+//   ## Question N
+//   질문 내용?
+//   - [x] 정답
+//   - [ ] 오답1
+//   - [ ] 오답2
+//   - [ ] 오답3
+//   **Hint:** 힌트
 function parseQuiz(markdown) {
   const questions = []
   const text = markdown.replace(/\r\n/g, '\n')
-  // --- 구분자로 블록 분리
-  const blocks = text.split(/\n\s*---+\s*\n/)
+  const LETTERS = ['A', 'B', 'C', 'D', 'E', 'F']
+
+  // ## Question N 또는 ## 문제 N 으로 블록 분리
+  const blocks = text.split(/\n(?=##\s+(?:Question|문제)\s*\d+)/i)
 
   for (const block of blocks) {
     if (!block.trim()) continue
+
     const lines = block.split('\n')
     let questionLines = []
     const options = []
-    let answer = ''
-    let explanation = ''
-    let section = 'question'
+    let correctIndex = -1
+    let hint = ''
+    let pastHeader = false
 
     for (const raw of lines) {
       const line = raw.trim()
       if (!line) continue
 
-      // 헤더 스킵 (## 퀴즈 등)
-      if (/^#+\s*(퀴즈|Quiz)/i.test(line)) continue
+      // ## Question N 헤더 — 이후를 질문으로 파싱 시작
+      if (/^##\s+(?:Question|문제)\s*\d+/i.test(line)) {
+        pastHeader = true
+        continue
+      }
 
-      // 보기: A) / A. / **A)** / ① 등
-      const optMatch = line.match(/^\*?\*?([A-Da-dㄱ-ㄹ①②③④])[.)]\*?\*?\s*(.+)/)
+      // 최상위 제목(#) 스킵
+      if (/^#[^#]/.test(line)) continue
+
+      // 보기: - [x] 정답  /  - [ ] 오답
+      const optMatch = line.match(/^-\s+\[([x ])\]\s+(.+)/i)
       if (optMatch) {
-        const letter = optMatch[1].toUpperCase()
-        const txt = optMatch[2].replace(/\*\*/g, '').trim()
-        options.push({ letter, text: txt })
-        section = 'options'
+        const isCorrect = optMatch[1].toLowerCase() === 'x'
+        if (isCorrect) correctIndex = options.length
+        options.push(optMatch[2].trim())
         continue
       }
 
-      // 정답: **Answer: B** / **정답: B** / Answer: B
-      const ansMatch = line.match(/\*?\*?\s*(?:정답|answer)[:\s：]\s*\*?\*?\s*([A-Da-dㄱ-ㄹ①②③④①②③④])/i)
-      if (ansMatch) {
-        answer = ansMatch[1].toUpperCase()
-        section = 'answer'
+      // Hint / 설명 라인
+      const hintMatch = line.match(/^\*\*(?:Hint|힌트|설명|Explanation)[:\s]\*\*\s*(.+)/i)
+                     || line.match(/^\*\*(?:Hint|힌트|설명|Explanation):\*\*\s*(.*)/i)
+      if (hintMatch) {
+        hint = hintMatch[1].replace(/\*\*/g, '').trim()
         continue
       }
 
-      // 설명: **Explanation:** / **설명:**
-      const explMatch = line.match(/^\*?\*?\s*(?:설명|explanation)[:\s：]\s*\*?\*?\s*(.*)/i)
-      if (explMatch) {
-        explanation = explMatch[1].replace(/\*\*/g, '').trim()
-        section = 'explanation'
-        continue
-      }
-
-      if (section === 'explanation') {
-        explanation += (explanation ? ' ' : '') + line.replace(/\*\*/g, '')
-        continue
-      }
-
-      // 질문 텍스트
-      if (section === 'question') {
-        const cleaned = line
-          .replace(/^\*?\*?\d+[.)]\s*/, '')
-          .replace(/^\*?\*?(?:Question|문제)\s*\d*[.):]?\s*\*?\*?\s*/i, '')
-          .replace(/\*\*/g, '')
-          .trim()
+      // 질문 본문 (헤더 이후, 보기 이전)
+      if (pastHeader && options.length === 0) {
+        const cleaned = line.replace(/\*\*/g, '').trim()
         if (cleaned) questionLines.push(cleaned)
       }
     }
 
     const questionText = questionLines.join(' ').trim()
-    if (questionText && options.length >= 2) {
-      questions.push({ question: questionText, options, answer, explanation })
+    if (questionText && options.length >= 2 && correctIndex >= 0) {
+      questions.push({
+        question: questionText,
+        options: options.map((t, i) => ({ letter: LETTERS[i], text: t })),
+        answer: LETTERS[correctIndex],
+        explanation: hint,
+      })
     }
   }
+
+  // 블록 분리 실패 시 --- 구분자로 재시도
+  if (questions.length === 0) {
+    const fallbackBlocks = text.split(/\n\s*---+\s*\n/)
+    for (const block of fallbackBlocks) {
+      const lines = block.split('\n')
+      let questionLines = []
+      const options = []
+      let correctIndex = -1
+      let hint = ''
+      for (const raw of lines) {
+        const line = raw.trim()
+        if (!line) continue
+        if (/^#/.test(line)) continue
+        const optMatch = line.match(/^-\s+\[([x ])\]\s+(.+)/i)
+        if (optMatch) {
+          if (optMatch[1].toLowerCase() === 'x') correctIndex = options.length
+          options.push(optMatch[2].trim())
+          continue
+        }
+        const hintMatch = line.match(/^\*\*(?:Hint|힌트|설명)[:\s]\*\*\s*(.+)/i)
+        if (hintMatch) { hint = hintMatch[1]; continue }
+        if (options.length === 0) {
+          const cleaned = line.replace(/^\*?\*?(?:Question|문제)\s*\d*[.):]?\s*\*?\*?/i, '').replace(/\*\*/g, '').trim()
+          if (cleaned) questionLines.push(cleaned)
+        }
+      }
+      const questionText = questionLines.join(' ').trim()
+      if (questionText && options.length >= 2 && correctIndex >= 0) {
+        questions.push({
+          question: questionText,
+          options: options.map((t, i) => ({ letter: ['A','B','C','D'][i], text: t })),
+          answer: ['A','B','C','D'][correctIndex],
+          explanation: hint,
+        })
+      }
+    }
+  }
+
   return questions
 }
 
