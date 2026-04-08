@@ -18,7 +18,6 @@ SKILL_CONFIG = {
     # gen_timeout: generate 함수 호출 자체의 타임아웃 (task_id 반환까지)
     'nlm-slides':      {'generate': 'slide_deck',  'download': 'slide_deck',  'ext': 'pptx', 'label': '슬라이드 덱',  'timeout': 600,  'source_timeout': 90, 'gen_timeout': 60},
     'nlm-quiz':        {'generate': 'quiz',         'download': 'quiz',        'ext': 'md',   'label': '퀴즈',         'timeout': 600,  'source_timeout': 60,  'gen_timeout': 120, 'no_language': True, 'include_content': True, 'dl_kwargs': {'output_format': 'markdown'}},
-    'nlm-flashcards':  {'generate': 'flashcards',   'download': 'flashcards',  'ext': 'md',   'label': '플래시카드',   'timeout': 600,  'source_timeout': 60,  'gen_timeout': 120, 'no_language': True, 'include_content': True},
     'nlm-datatable':   {'generate': 'data_table',   'download': 'data_table',  'ext': 'csv',  'label': '데이터 표',    'timeout': 600,  'source_timeout': 60,  'gen_timeout': 120, 'no_language': True},
     'nlm-mindmap':     {'generate': 'mind_map',     'download': 'mind_map',    'ext': 'html', 'label': '마인드맵',     'timeout': 300,  'source_timeout': 60,  'no_wait': True, 'post': 'mindmap_to_html'},
 }

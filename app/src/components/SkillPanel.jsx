@@ -28,8 +28,6 @@ export const NLM_SKILLS = [
     detail: 'Google NotebookLM이 내용을 분석해 발표자료 PPTX 파일을 생성합니다. Google One AI Premium 유료 계정 필요. PowerPoint 또는 Keynote에서 열립니다.' },
   { id: 'nlm-quiz',        label: '퀴즈',        icon: '？',  desc: '학습 퀴즈 생성',              color: '#f4b400', type: 'nlm', ext: 'md',   app: 'TextEdit',
     detail: '내용 기반의 객관식 퀴즈를 생성합니다. 보기 순서는 랜덤으로 섞이며, Tidy 앱 안에서 바로 풀고 점수를 확인할 수 있습니다.' },
-  { id: 'nlm-flashcards',  label: '플래시카드',  icon: '⊟',  desc: '암기 카드 생성',              color: '#ff6d00', type: 'nlm', ext: 'md',   app: 'TextEdit',
-    detail: '핵심 개념을 앞면(질문)·뒷면(답) 형태의 플래시카드로 생성합니다. 카드를 클릭해 뒤집으며 학습하고 알고/모름으로 분류할 수 있습니다.' },
   { id: 'nlm-datatable',   label: '데이터 표',   icon: '⊞',  desc: '구조화된 CSV 표 생성',        color: '#0f9d58', type: 'nlm', ext: 'csv',  app: 'Numbers',
     detail: '텍스트에서 구조화된 데이터를 추출해 CSV 표로 저장합니다. Numbers나 Excel에서 바로 열 수 있습니다.' },
   { id: 'nlm-mindmap',     label: '마인드맵',    icon: '⊛',  desc: '마인드맵 시각화 생성',         color: '#ab47bc', type: 'nlm', ext: 'html', app: 'Safari',

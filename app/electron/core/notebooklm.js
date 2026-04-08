@@ -96,7 +96,6 @@ function openLogin() {
 const SKILL_PROCESS_TIMEOUT = {
   'nlm-slides':      1260000,  // 21분 (90 + 60 + 600 + 300)
   'nlm-quiz':         900000,  // 15분 (60 + 120 + 600 + 120)
-  'nlm-flashcards':   900000,  // 15분
   'nlm-datatable':    900000,  // 15분
   'nlm-mindmap':      540000,  //  9분 (60 + 300 + 120)
 }
