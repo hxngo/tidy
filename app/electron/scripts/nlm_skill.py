@@ -11,18 +11,19 @@ import json
 import os
 
 SKILL_CONFIG = {
-    # timeout: wait_for_completion 타임아웃 (초)
+    # timeout: asyncio.wait_for 타임아웃 (초)
     # source_timeout: add_text wait_timeout (초)
     'nlm-slides':      {'generate': 'slide_deck',  'download': 'slide_deck',  'ext': 'pptx', 'label': '슬라이드 덱',  'timeout': 600,  'source_timeout': 180},
     'nlm-audio':       {'generate': 'audio',        'download': 'audio',       'ext': 'mp3',  'label': '오디오 요약',  'timeout': 1200, 'source_timeout': 180},
     'nlm-video':       {'generate': 'video',        'download': 'video',       'ext': 'mp4',  'label': '영상 요약',    'timeout': 1800, 'source_timeout': 180},
     'nlm-infographic': {'generate': 'infographic',  'download': 'infographic', 'ext': 'png',  'label': '인포그래픽',   'timeout': 900,  'source_timeout': 180},
-    'nlm-quiz':        {'generate': 'quiz',         'download': 'quiz',        'ext': 'md',   'label': '퀴즈',         'timeout': 300,  'source_timeout': 120, 'dl_kwargs': {'output_format': 'markdown'}},
-    'nlm-flashcards':  {'generate': 'flashcards',   'download': 'flashcards',  'ext': 'md',   'label': '플래시카드',   'timeout': 300,  'source_timeout': 120, 'dl_kwargs': {'output_format': 'markdown'}},
-    'nlm-datatable':   {'generate': 'data_table',   'download': 'data_table',  'ext': 'csv',  'label': '데이터 표',    'timeout': 300,  'source_timeout': 120},
-    'nlm-report':      {'generate': 'report',       'download': 'report',      'ext': 'md',   'label': '브리핑 문서',  'timeout': 300,  'source_timeout': 120},
+    'nlm-quiz':        {'generate': 'quiz',         'download': 'quiz',        'ext': 'md',   'label': '퀴즈',         'timeout': 600,  'source_timeout': 120, 'dl_kwargs': {'output_format': 'markdown'}},
+    'nlm-flashcards':  {'generate': 'flashcards',   'download': 'flashcards',  'ext': 'md',   'label': '플래시카드',   'timeout': 600,  'source_timeout': 120, 'dl_kwargs': {'output_format': 'markdown'}},
+    'nlm-datatable':   {'generate': 'data_table',   'download': 'data_table',  'ext': 'csv',  'label': '데이터 표',    'timeout': 600,  'source_timeout': 120},
+    'nlm-report':      {'generate': 'report',       'download': 'report',      'ext': 'md',   'label': '브리핑 문서',  'timeout': 600,  'source_timeout': 120},
     'nlm-mindmap':     {'generate': 'mind_map',     'download': 'mind_map',    'ext': 'html', 'label': '마인드맵',     'timeout': 300,  'source_timeout': 120, 'no_wait': True, 'post': 'mindmap_to_html'},
 }
+
 
 def log(data):
     print(json.dumps(data, ensure_ascii=False), flush=True)
@@ -30,10 +31,12 @@ def log(data):
 
 def mindmap_to_html(json_path, html_path):
     """NotebookLM 마인드맵 JSON → Markmap 시각화"""
-    with open(json_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
+    try:
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except Exception as e:
+        raise RuntimeError(f'마인드맵 JSON 파싱 실패: {e}')
 
-    # JSON → Markdown 아웃라인 변환
     def to_markdown(node, depth=1):
         if not node or not isinstance(node, dict):
             return ''
@@ -43,13 +46,18 @@ def mindmap_to_html(json_path, html_path):
         if text:
             lines.append('#' * min(depth, 6) + ' ' + text)
         for child in children:
-            lines.append(to_markdown(child, depth + 1))
-        return '\n'.join(filter(None, lines))
+            child_md = to_markdown(child, depth + 1)
+            if child_md:
+                lines.append(child_md)
+        return '\n'.join(lines)
 
     raw_root = data.get('root') or data.get('mind_map') or data
     if isinstance(raw_root, list):
         raw_root = {'children': raw_root}
     markdown = to_markdown(raw_root)
+
+    if not markdown.strip():
+        raise RuntimeError('마인드맵 내용이 비어있습니다.')
 
     html = f"""<!DOCTYPE html>
 <html lang="ko">
@@ -134,15 +142,14 @@ async def main():
                 gen_fn = getattr(client.artifacts, f'generate_{cfg["generate"]}')
 
                 if cfg.get('no_wait'):
-                    # mind_map은 결과 직접 반환, wait 불필요
-                    await gen_fn(nb_id)
+                    # mind_map은 generate 자체가 완료까지 대기 (GenerationStatus 반환 안 함)
+                    await asyncio.wait_for(gen_fn(nb_id), timeout=completion_timeout)
+                    log({'progress': '생성 완료', 'step': 4, 'total': 5})
                 else:
                     status = await gen_fn(nb_id, language=language)
                     task_id = status.task_id if hasattr(status, 'task_id') else status['task_id']
 
-                    log({'progress': f'생성 완료 대기 중... (최대 {completion_timeout//60}분)', 'step': 4, 'total': 5})
-                    # asyncio.wait_for로 타임아웃 강제 적용
-                    # (wait_for_completion의 timeout 파라미터가 무시되는 경우 대비)
+                    log({'progress': f'생성 완료 대기 중... (최대 {completion_timeout // 60}분)', 'step': 4, 'total': 5})
                     await asyncio.wait_for(
                         client.artifacts.wait_for_completion(nb_id, task_id),
                         timeout=completion_timeout
@@ -153,13 +160,16 @@ async def main():
                 os.makedirs(output_dir, exist_ok=True)
                 out_path = os.path.join(output_dir, f'tidy-{skill_id}.{cfg["ext"]}')
 
-                # 마인드맵은 JSON으로 먼저 받은 뒤 HTML로 변환
                 if cfg.get('post') == 'mindmap_to_html':
+                    # JSON으로 받은 뒤 HTML로 변환
                     json_path = out_path.replace('.html', '.json')
                     dl_fn = getattr(client.artifacts, f'download_{cfg["download"]}')
                     await dl_fn(nb_id, json_path)
-                    mindmap_to_html(json_path, out_path)
-                    os.remove(json_path)  # 원본 JSON 삭제
+                    try:
+                        mindmap_to_html(json_path, out_path)
+                    finally:
+                        if os.path.exists(json_path):
+                            os.remove(json_path)
                 else:
                     dl_fn = getattr(client.artifacts, f'download_{cfg["download"]}')
                     dl_kwargs = cfg.get('dl_kwargs', {})
@@ -173,11 +183,16 @@ async def main():
                 except Exception:
                     pass
 
+    except asyncio.TimeoutError:
+        mins = cfg.get('timeout', 600) // 60
+        log({'error': f'시간 초과 ({mins}분). 텍스트를 줄이거나 나중에 다시 시도하세요.'})
+        sys.exit(1)
     except FileNotFoundError:
         log({'error': 'notebooklm login을 먼저 실행해주세요.', 'setup_required': True, 'step': 'login'})
         sys.exit(1)
     except Exception as e:
         log({'error': str(e)})
         sys.exit(1)
+
 
 asyncio.run(main())

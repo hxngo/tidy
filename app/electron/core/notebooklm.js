@@ -98,11 +98,11 @@ const SKILL_PROCESS_TIMEOUT = {
   'nlm-video': 1860000,   // 31분
   'nlm-slides': 660000,   // 11분
   'nlm-infographic': 960000,   // 16분
-  'nlm-quiz': 360000,
-  'nlm-flashcards': 360000,
-  'nlm-datatable': 360000,
-  'nlm-report': 360000,
-  'nlm-mindmap': 360000,
+  'nlm-quiz': 660000,        // 11분 (Python 600s + 60s)
+  'nlm-flashcards': 660000,  // 11분
+  'nlm-datatable': 660000,   // 11분
+  'nlm-report': 660000,      // 11분
+  'nlm-mindmap': 420000,     // 7분 (Python 300s + 120s)
 }
 
 // 스킬 실행 (Python 서브프로세스)
