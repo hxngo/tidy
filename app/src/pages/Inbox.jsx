@@ -273,29 +273,53 @@ export default function Inbox({ highlightItemId, onHighlightConsumed }) {
   }
 
   async function handleDelete(id) {
+    // UI 즉시 반영
     setItems((prev) => prev.filter((item) => item.id !== id))
     if (modalItem?.id === id) handleCloseModal()
-    try { await window.tidy?.inbox.trash(id) } catch {}
+    try {
+      const result = await window.tidy?.inbox.trash(id)
+      if (result?.success === false) {
+        // 백엔드 실패 시 목록 재조회해서 동기화
+        console.warn('[Inbox] 휴지통 이동 실패, 목록 재조회')
+        const data = await window.tidy?.inbox.get({ limit: 200 })
+        if (Array.isArray(data)) setItems(data)
+      }
+    } catch (e) {
+      console.error('[Inbox] 삭제 오류:', e)
+      const data = await window.tidy?.inbox.get({ limit: 200 })
+      if (Array.isArray(data)) setItems(data)
+    }
   }
 
   async function handleRestoreTrash(id) {
     setTrashItems((prev) => prev.filter((item) => item.id !== id))
-    try { await window.tidy?.inbox.restoreTrash(id) } catch {}
-    // 인박스 목록 새로고침
+    try {
+      await window.tidy?.inbox.restoreTrash(id)
+    } catch (e) {
+      console.error('[Inbox] 복구 오류:', e)
+    }
+    // 인박스 목록 새로고침 (복구된 아이템 표시)
     const data = await window.tidy?.inbox.get({ limit: 200 })
     if (Array.isArray(data)) setItems(data)
   }
 
   async function handleDeletePermanent(id) {
     setTrashItems((prev) => prev.filter((item) => item.id !== id))
-    try { await window.tidy?.inbox.deletePermanent(id) } catch {}
+    try {
+      await window.tidy?.inbox.deletePermanent(id)
+    } catch (e) {
+      console.error('[Inbox] 영구삭제 오류:', e)
+    }
   }
 
   async function handleEmptyTrash() {
-    for (const item of trashItems) {
-      try { await window.tidy?.inbox.deletePermanent(item.id) } catch {}
-    }
+    const ids = trashItems.map(i => i.id)
     setTrashItems([])
+    for (const id of ids) {
+      try { await window.tidy?.inbox.deletePermanent(id) } catch (e) {
+        console.error('[Inbox] 전체삭제 오류:', e)
+      }
+    }
   }
 
   async function handleMarkAllDone() {

@@ -361,6 +361,11 @@ function deleteItem(id) {
         idx.deleteItemById(id)
         console.log('[Vault] 아이템 삭제 (index):', id)
         return true
+      } else if (item) {
+        // 파일은 없지만 SQLite에 남아있는 경우 → 인덱스만 정리
+        idx.deleteItemById(id)
+        console.log('[Vault] 아이템 인덱스 정리 (파일 없음):', id)
+        return true
       }
     }
   } catch (e) { console.error('[Vault] index deleteItem 오류:', e.message) }
@@ -422,6 +427,7 @@ function trashItem(id) {
 
   if (targetFile) return doTrash(targetFile, targetMeta, targetBody)
 
+  // 파일 스캔 fallback
   for (const filePath of filesToSearch) {
     try {
       const content = fs.readFileSync(filePath, 'utf-8')
@@ -438,6 +444,17 @@ function trashItem(id) {
       return true
     } catch {}
   }
+
+  // 파일도 없고 SQLite에만 남아있는 경우 → 인덱스만 정리
+  try {
+    const idx = getIndex()
+    if (idx && idx.getItemById(id)) {
+      idx.deleteItemById(id)
+      console.log('[Vault] 휴지통 이동 실패 — 인덱스만 정리:', id)
+      return true
+    }
+  } catch {}
+
   return false
 }
 
@@ -487,9 +504,12 @@ function restoreTrashItem(id) {
     const originalPath = meta.original_path
     delete meta.trashed_at
     delete meta.original_path
+
+    let restoredPath
     if (originalPath) {
       ensureDir(path.dirname(originalPath))
       fs.writeFileSync(originalPath, serializeFrontmatter(meta, body), 'utf-8')
+      restoredPath = originalPath
     } else {
       // 원본 경로 없으면 item 정보로 재라우팅
       const item = {
@@ -499,9 +519,16 @@ function restoreTrashItem(id) {
         people: JSON.parse(meta.people || '[]'),
         notifSender: null,
       }
-      const newPath = routeItemPath(item)
-      fs.writeFileSync(newPath, serializeFrontmatter(meta, body), 'utf-8')
+      restoredPath = routeItemPath(item)
+      fs.writeFileSync(restoredPath, serializeFrontmatter(meta, body), 'utf-8')
     }
+
+    // SQLite 인덱스 재등록 (복구 후 인박스에 표시되려면 반드시 필요)
+    try {
+      const restored = _readItemFile(restoredPath)
+      if (restored) getIndex()?.insertItem({ ...restored, file_path: restoredPath })
+    } catch (e) { console.error('[Vault] 복구 인덱스 등록 오류:', e.message) }
+
     fs.unlinkSync(trashFile)
     console.log('[Vault] 휴지통 복구:', id)
     return true
