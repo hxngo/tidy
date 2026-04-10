@@ -286,17 +286,17 @@ async function processIncomingMessage(rawText, source, win, opts = {}) {
 
   console.log(`[Agent] 분석 완료: skip=${analysis.skip}, 카테고리=${analysis.category}, 인물=${(analysis.people||[]).join(',')}, 프로젝트=${analysis.project_hint}`)
 
-  // AI가 skip=true로 판단한 경우 (단순 인사/확인/의미없는 메시지) 저장 건너뜀
+  // AI가 skip=true로 판단한 경우 저장 건너뜀
+  // 기본값: skip=true (마감·요청·약속·중요참조 정보가 있을 때만 skip=false로 저장)
   if (analysis.skip === true) {
     console.log('[Agent] skip=true — 저장 건너뜀:', rawText.slice(0, 60))
     return null
   }
 
-  // 알림 소스(gmail/slack 제외)에서 온 항목이 요약/액션/인물 모두 없으면 노이즈로 판단해 저장 건너뜀
-  const isNotificationSource = !['gmail', 'slack', 'gdrive', 'file', 'manual', 'meeting'].includes(source)
+  // 2차 안전망: skip=false임에도 아무 내용도 추출 못한 경우 저장 안 함
   const hasNoValue = !analysis.summary && !(analysis.action_items?.length) && !(analysis.people?.length) && analysis.priority !== 'high'
-  if (isNotificationSource && hasNoValue) {
-    console.log('[Agent] 가치 없는 알림 건너뜀 (요약/액션/인물 없음):', source)
+  if (hasNoValue) {
+    console.log('[Agent] 내용 없음 — 저장 건너뜀:', source)
     return null
   }
 
