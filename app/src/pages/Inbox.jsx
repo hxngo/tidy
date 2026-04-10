@@ -139,6 +139,7 @@ export default function Inbox({ highlightItemId, onHighlightConsumed }) {
   const [trashItems, setTrashItems] = useState([])
   const [trashLoading, setTrashLoading] = useState(false)
   const [emptyTrashConfirm, setEmptyTrashConfirm] = useState(false)
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null)
   // 커스텀/자동감지 소스 카테고리 (BUILTIN과 병합해서 사용)
   const [customSources, setCustomSources] = useState([])
 
@@ -630,12 +631,30 @@ export default function Inbox({ highlightItemId, onHighlightConsumed }) {
                     >
                       복구
                     </button>
-                    <button
-                      onClick={() => handleDeletePermanent(item.id)}
-                      className="text-[11px] text-[#6b6e8c] hover:text-red-500 px-2.5 py-1 rounded-md hover:bg-red-500/5 transition-colors whitespace-nowrap"
-                    >
-                      영구삭제
-                    </button>
+                    {confirmDeleteId === item.id ? (
+                      <>
+                        <span className="text-[11px] text-[#8a8ca8]">정말요?</span>
+                        <button
+                          onClick={() => { setConfirmDeleteId(null); handleDeletePermanent(item.id) }}
+                          className="text-[11px] text-red-500 hover:text-red-400 font-medium px-2 py-1 rounded-md hover:bg-red-500/5 transition-colors whitespace-nowrap"
+                        >
+                          삭제
+                        </button>
+                        <button
+                          onClick={() => setConfirmDeleteId(null)}
+                          className="text-[11px] text-[#505272] hover:text-[#8a8ca8] px-2 py-1 rounded-md hover:bg-[#1a1c28] transition-colors whitespace-nowrap"
+                        >
+                          취소
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        onClick={() => setConfirmDeleteId(item.id)}
+                        className="text-[11px] text-[#6b6e8c] hover:text-red-500 px-2.5 py-1 rounded-md hover:bg-red-500/5 transition-colors whitespace-nowrap"
+                      >
+                        영구삭제
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
