@@ -240,12 +240,33 @@ async function processIncomingMessage(rawText, source, win, opts = {}) {
     return null
   }
 
-  // 사전 필터: 단순 인사/감사/반응 패턴 — AI 호출 없이 즉시 건너뜀 (버퍼에서도 걸러지지만 이중 방어)
+  // ── 사전 필터 (AI 호출 전 코드로 차단) ──────────────────────────────
   const trimmed = rawText.trim()
+
+  // 1. 단순 인사/감사/반응 패턴
   const TRIVIAL_PATTERN = /^(네|넵|넹|ㅇㅋ|ㅇㅇ|ㅇ|ok|okay|알겠어|알겠습니다|알겠어요|알겠다|알겠음|고마워|감사합니다|감사해요|고맙습니다|수고하세요|수고하셨습니다|확인했어요|확인했습니다|확인함|확인|ㄱㅅ|ㄳ|👍|🙏)[.!~ㅋ\s]*$/i
   if (!preAnalyzed && trimmed.length <= 30 && TRIVIAL_PATTERN.test(trimmed)) {
     console.log('[Agent] 단순 반응 메시지 건너뜀 (사전 필터):', trimmed)
     return null
+  }
+
+  // 2. 미디어/콘텐츠 앱 소스 — 인증번호/비밀번호가 없으면 즉시 스킵
+  const NOISE_SOURCES = new Set([
+    'alertnotificationservice', // YouTube, 뉴스, 앱 알림 집합체
+    'claudefordesktop',         // Claude 앱 자체 알림
+    'com.apple.notificationcenterui', // macOS 시스템 알림
+  ])
+  const effectiveSource = (source || '').toLowerCase()
+  const effectiveBundleId = (bundleId || '').toLowerCase()
+  const isNoiseSource = NOISE_SOURCES.has(effectiveSource) || NOISE_SOURCES.has(effectiveBundleId)
+
+  if (!preAnalyzed && isNoiseSource) {
+    // 인증번호/OTP/비밀번호가 포함된 경우만 예외적으로 통과
+    const hasImportantCode = /인증번호|인증코드|otp|비밀번호|password|pin\b|계좌번호|카드번호/i.test(trimmed)
+    if (!hasImportantCode) {
+      console.log('[Agent] 노이즈 소스 알림 건너뜀:', effectiveSource, trimmed.slice(0, 50))
+      return null
+    }
   }
   const itemId = randomUUID()
   const now = new Date().toISOString()
@@ -261,7 +282,9 @@ async function processIncomingMessage(rawText, source, win, opts = {}) {
     if (preAnalyzed) {
       analysis = preAnalyzed
     } else {
-      analysis = await analyzeMessage(rawText, {
+      // 소스 정보를 rawText 앞에 붙여 AI가 출처를 파악할 수 있게 함
+      const textWithSource = source ? `[출처: ${source}]\n${rawText}` : rawText
+      analysis = await analyzeMessage(textWithSource, {
         people: existingPeople,
         projects: existingProjects,
         workTypes,
@@ -274,7 +297,14 @@ async function processIncomingMessage(rawText, source, win, opts = {}) {
     if (!isRetry && !error.message.includes('API 키')) {
       addToRetryQueue(rawText, source)
     }
+    // 알림/앱 소스에서 AI 실패 시 저장 안 함 (노이즈 방지)
+    const trustedSources = new Set(['gmail', 'slack', 'gdrive', 'file', 'manual', 'meeting', 'imessage', 'kakaotalkmac'])
+    if (!trustedSources.has((source || '').toLowerCase())) {
+      console.log('[Agent] AI 실패 + 신뢰되지 않은 소스 → 저장 건너뜀:', source)
+      return null
+    }
     analysis = {
+      skip: false,
       summary: rawText.slice(0, 100),
       category: '정보',
       people: [],

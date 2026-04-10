@@ -26,6 +26,11 @@ function getClient() {
 // 캐시 가능한 정적 규칙 블록 (카테고리 목록 제외, 변경 없으면 5분간 캐시됨)
 const STATIC_RULES = `당신은 업무 자동화 AI입니다. 입력(텍스트 또는 이미지)을 분석해 아래 JSON 형식으로만 반환하세요.
 
+입력 텍스트 첫 줄에 "[출처: xxx]" 형태로 소스 앱 이름이 포함될 수 있습니다. 이를 참고해 skip 여부를 판단하세요.
+- kakaotalkmac, imessage, slack → 실제 사람이 보낸 메시지. 내용에 따라 판단
+- alertnotificationservice → YouTube/뉴스/앱 집합 알림. 인증번호 없으면 skip=true
+- claudefordesktop → AI 앱 자체 알림. 항상 skip=true
+
 규칙:
 - people 배열은 <context>의 "알고 있는 인물" 목록과 일치하는 정확한 이름 우선 사용
 - project_hint는 <context>의 "진행 중인 프로젝트" 목록과 일치하는 정확한 이름 우선 사용
