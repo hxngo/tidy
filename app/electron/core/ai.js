@@ -27,7 +27,12 @@ function getClient() {
 const STATIC_RULES = `당신은 업무 자동화 AI입니다. 입력(텍스트 또는 이미지)을 분석해 아래 JSON 형식으로만 반환하세요.
 
 입력 텍스트 첫 줄에 "[출처: xxx]" 형태로 소스 앱 이름이 포함될 수 있습니다. 이를 참고해 skip 여부를 판단하세요.
-- kakaotalkmac, imessage, slack → 실제 사람이 보낸 메시지. 내용에 따라 판단
+- kakaotalkmac → 카카오톡. 아래 기준으로 엄격하게 판단:
+  • skip=true: 이모티콘/사진/파일 전송 알림, ㅋㅋ/ㅎㅎ/ㅜㅜ 반응, "아하/맞아/그렇구나" 등 단순 반응,
+              내가 아닌 제3자 사이의 대화 보고, 의미없는 단어/은어
+  • skip=false: 나에게 직접 약속/만남 요청, 마감 있는 업무 요청, 중요 정보 전달
+- imessage → SMS/iMessage. 인증번호·예약확인·중요 약속만 skip=false
+- slack → 업무 메시지. 내용에 따라 판단
 - alertnotificationservice → YouTube/뉴스/앱 집합 알림. 인증번호 없으면 skip=true
 - claudefordesktop → AI 앱 자체 알림. 항상 skip=true
 

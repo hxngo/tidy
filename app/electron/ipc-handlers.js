@@ -242,22 +242,48 @@ async function processIncomingMessage(rawText, source, win, opts = {}) {
 
   // ── 사전 필터 (AI 호출 전 코드로 차단) ──────────────────────────────
   const trimmed = rawText.trim()
+  const effectiveSource = (source || '').toLowerCase()
+  const effectiveBundleId = (bundleId || '').toLowerCase()
 
-  // 1. 단순 인사/감사/반응 패턴
+  // 1. 단순 인사/감사/반응 패턴 (짧은 메시지)
   const TRIVIAL_PATTERN = /^(네|넵|넹|ㅇㅋ|ㅇㅇ|ㅇ|ok|okay|알겠어|알겠습니다|알겠어요|알겠다|알겠음|고마워|감사합니다|감사해요|고맙습니다|수고하세요|수고하셨습니다|확인했어요|확인했습니다|확인함|확인|ㄱㅅ|ㄳ|👍|🙏)[.!~ㅋ\s]*$/i
   if (!preAnalyzed && trimmed.length <= 30 && TRIVIAL_PATTERN.test(trimmed)) {
     console.log('[Agent] 단순 반응 메시지 건너뜀 (사전 필터):', trimmed)
     return null
   }
 
-  // 2. 미디어/콘텐츠 앱 소스 — 인증번호/비밀번호가 없으면 즉시 스킵
+  // 2. 카카오톡 전용 필터 — 메시지 내용 추출 후 모두 trivial이면 스킵
+  if (!preAnalyzed && effectiveSource === 'kakaotalkmac') {
+    // "[메시지 N] 발신자: 내용" 배치 형식 or "발신자: 내용" 단일 형식에서 내용만 추출
+    const KAKAO_BATCH_RE = /^\[메시지\s*\d+\]\s*[^:]+:\s*(.+)$/
+    const KAKAO_SINGLE_RE = /^[^:]+:\s*(.+)$/
+    const lines = trimmed.split('\n').map(l => l.trim()).filter(Boolean)
+    const contents = lines.map(l => {
+      const batch = KAKAO_BATCH_RE.exec(l)
+      if (batch) return batch[1].trim()
+      const single = KAKAO_SINGLE_RE.exec(l)
+      if (single) return single[1].trim()
+      return l
+    })
+    // trivial 판별: 이모티콘 알림, ㅋ/ㅎ 반복, 짧은 반응어, 의미없는 텍스트
+    const KAKAO_TRIVIAL_RE = /^(이모티콘을 보냈습니다|사진을 보냈습니다|동영상을 보냈습니다|파일을 보냈습니다|스티커를 보냈습니다|보이스톡|페이스톡|ㅋ+ㅎ*|ㅎ+ㅋ*|ㅠ+|ㅜ+|ㄷ+|아하|오케|ㅇㅋ|넵|네+|ㄱㄷ|굿+|ㄴㄴ|노노|맞아|그렇구나|그런 느낌이구나|롸키요|헐|ㄹㅇ|ㅇㅈ|ㄹㅇㅋㅋ|오|오오|ㄱ+|ㅅ+ㅂ+|😂|🤣|👍|🙏|😊|ㅜㅜ|ㅠㅠ)[ㅋㅎ\s!~.]*$/i
+    const allTrivial = contents.length > 0 && contents.every(c =>
+      KAKAO_TRIVIAL_RE.test(c) ||
+      /^[ㅋㅎㅜㅠ\s]+$/.test(c) ||   // ㅋㅋ/ㅎㅎ 반복
+      c.length <= 2                     // 2글자 이하 반응
+    )
+    if (allTrivial) {
+      console.log('[Agent] 카카오톡 trivial 메시지 건너뜀:', trimmed.slice(0, 60))
+      return null
+    }
+  }
+
+  // 3. 미디어/콘텐츠 앱 소스 — 인증번호/비밀번호가 없으면 즉시 스킵
   const NOISE_SOURCES = new Set([
     'alertnotificationservice', // YouTube, 뉴스, 앱 알림 집합체
     'claudefordesktop',         // Claude 앱 자체 알림
     'com.apple.notificationcenterui', // macOS 시스템 알림
   ])
-  const effectiveSource = (source || '').toLowerCase()
-  const effectiveBundleId = (bundleId || '').toLowerCase()
   const isNoiseSource = NOISE_SOURCES.has(effectiveSource) || NOISE_SOURCES.has(effectiveBundleId)
 
   if (!preAnalyzed && isNoiseSource) {
