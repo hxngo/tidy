@@ -138,6 +138,7 @@ export default function Inbox({ highlightItemId, onHighlightConsumed }) {
   const [searchQuery, setSearchQuery] = useState('')
   const [trashItems, setTrashItems] = useState([])
   const [trashLoading, setTrashLoading] = useState(false)
+  const [emptyTrashConfirm, setEmptyTrashConfirm] = useState(false)
   // 커스텀/자동감지 소스 카테고리 (BUILTIN과 병합해서 사용)
   const [customSources, setCustomSources] = useState([])
 
@@ -313,6 +314,11 @@ export default function Inbox({ highlightItemId, onHighlightConsumed }) {
   }
 
   async function handleEmptyTrash() {
+    if (!emptyTrashConfirm) {
+      setEmptyTrashConfirm(true)
+      return
+    }
+    setEmptyTrashConfirm(false)
     const ids = trashItems.map(i => i.id)
     setTrashItems([])
     for (const id of ids) {
@@ -581,12 +587,30 @@ export default function Inbox({ highlightItemId, onHighlightConsumed }) {
             <div className="p-4 space-y-2">
               <div className="flex items-center justify-between mb-1">
                 <span className="text-[11px] text-[#505272]">{trashItems.length}개 항목</span>
-                <button
-                  onClick={handleEmptyTrash}
-                  className="text-[11px] text-red-500/60 hover:text-red-500 transition-colors"
-                >
-                  전체 삭제
-                </button>
+                {emptyTrashConfirm ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-[#8a8ca8]">정말 비울까요?</span>
+                    <button
+                      onClick={handleEmptyTrash}
+                      className="text-[11px] text-red-500 hover:text-red-400 font-medium transition-colors"
+                    >
+                      비우기
+                    </button>
+                    <button
+                      onClick={() => setEmptyTrashConfirm(false)}
+                      className="text-[11px] text-[#505272] hover:text-[#8a8ca8] transition-colors"
+                    >
+                      취소
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={handleEmptyTrash}
+                    className="text-[11px] text-red-500/60 hover:text-red-500 transition-colors"
+                  >
+                    전체 삭제
+                  </button>
+                )}
               </div>
               {trashItems.map((item) => (
                 <div key={item.id} className="bg-[#0f1018] border border-[#1c1e2a] rounded-xl px-4 py-3 flex items-start gap-3 opacity-70">
