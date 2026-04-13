@@ -255,10 +255,10 @@ export default function Home() {
           {showSkillPicker && (
             <div
               ref={pickerRef}
-              className="absolute bottom-full mb-2 left-0 right-0 z-40 bg-[#131318] border border-[#1e2030] rounded-2xl shadow-2xl overflow-hidden fade-in"
+              className="absolute bottom-full mb-2 left-0 right-0 z-40 bg-[#131318] border border-[#1e2030] rounded-2xl shadow-2xl fade-in"
             >
               {/* AI 스킬 섹션 */}
-              <div className="px-4 pt-3.5 pb-2 border-b border-[#1a1c28]">
+              <div className="px-4 pt-3.5 pb-2 border-b border-[#1a1c28] rounded-t-2xl">
                 <div className="flex items-center gap-2 mb-2.5">
                   <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="#6366f1" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M9 2L7 8H2l4 3-1.5 5L9 13l4.5 3L12 11l4-3H11L9 2z"/>
@@ -306,7 +306,7 @@ export default function Home() {
               </div>
 
               {/* NotebookLM 스킬 섹션 */}
-              <div className="px-4 pt-3 pb-3.5">
+              <div className="px-4 pt-3 pb-3.5 rounded-b-2xl">
                 <div className="flex items-center gap-2 mb-2.5">
                   <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="#4285f4" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="8" cy="8" r="6.5"/>
