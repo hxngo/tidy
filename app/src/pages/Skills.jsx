@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import SkillPanel, { SKILLS, skillById } from '../components/SkillPanel.jsx'
 
 // ─── 출력물 카드 ──────────────────────────────────────────────
@@ -79,6 +79,8 @@ function SkillRunner({ skill, onClose }) {
   const [input, setInput] = useState('')
   const [panelOpen, setPanelOpen] = useState(false)
   const [runInput, setRunInput] = useState('')
+  // Option B: 번역 스킬은 소개 화면 먼저
+  const [showIntro, setShowIntro] = useState(skill.id === 'translate')
 
   function handleRun() {
     if (!input.trim()) return
@@ -96,59 +98,131 @@ function SkillRunner({ skill, onClose }) {
           className="bg-[#0d0e16] border border-[#1c1e2c] rounded-2xl w-full max-w-xl shadow-2xl fade-in"
           onClick={e => e.stopPropagation()}
         >
-          {/* Header */}
-          <div className="flex items-center gap-3 px-5 pt-5 pb-4 border-b border-[#1c1e2c]">
-            <div
-              className="w-8 h-8 rounded-xl flex items-center justify-center text-base flex-shrink-0"
-              style={{ background: skill.color + '22', color: skill.color }}
-            >
-              {skill.icon}
-            </div>
-            <div>
-              <p className="text-[13px] font-semibold text-[#e0e0f0]">{skill.label}</p>
-              <p className="text-[11px] text-[#505272] mt-0.5">{skill.desc}</p>
-            </div>
-            <div className="flex-1" />
-            <button onClick={onClose} className="text-[#505272] hover:text-[#9a9cb8] transition-colors">
-              <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                <path d="M2 2l12 12M14 2L2 14"/>
-              </svg>
-            </button>
-          </div>
 
-          {/* Input */}
-          <div className="px-5 py-4">
-            <label className="text-[11px] text-[#505272] font-medium mb-2 block">입력 내용</label>
-            <textarea
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              placeholder={`${skill.label}할 내용을 입력하거나 붙여넣기…`}
-              className="w-full h-40 bg-[#0a0b12] border border-[#1c1e2c] rounded-xl px-3.5 py-3 text-[12px] text-[#d0d0e4] placeholder-[#3a3c58] focus:outline-none focus:border-[#3a3c6a] resize-none"
-              autoFocus
-              onKeyDown={e => {
-                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') handleRun()
-              }}
-            />
-            <p className="text-[10px] text-[#3a3c50] mt-1.5">⌘↵ 로 실행</p>
-          </div>
+          {/* ── Option B: 번역 소개 화면 ── */}
+          {showIntro ? (
+            <>
+              {/* 닫기 버튼 */}
+              <div className="flex justify-end px-4 pt-4">
+                <button onClick={onClose} className="text-[#505272] hover:text-[#9a9cb8] transition-colors">
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                    <path d="M2 2l12 12M14 2L2 14"/>
+                  </svg>
+                </button>
+              </div>
 
-          {/* Footer */}
-          <div className="px-5 pb-5 flex justify-end gap-2">
-            <button
-              onClick={onClose}
-              className="text-[12px] text-[#6b6e8c] hover:text-[#9a9cb8] px-4 py-2 rounded-xl hover:bg-[#14151e] transition-colors"
-            >
-              취소
-            </button>
-            <button
-              onClick={handleRun}
-              disabled={!input.trim()}
-              className="text-[12px] font-medium text-white px-5 py-2 rounded-xl transition-all disabled:opacity-30"
-              style={{ background: skill.color }}
-            >
-              실행
-            </button>
-          </div>
+              {/* 아이콘 + 이름 */}
+              <div className="flex flex-col items-center pt-2 pb-6 px-8 text-center">
+                <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl mb-4"
+                  style={{ background: skill.color + '20', color: skill.color }}>
+                  {skill.icon}
+                </div>
+                <h2 className="text-[16px] font-semibold text-[#e0e0f0] mb-1">{skill.label}</h2>
+                <p className="text-[12px] text-[#6b6e8c] leading-relaxed">{skill.detail}</p>
+              </div>
+
+              {/* 사용 예시 */}
+              {skill.examples && (
+                <div className="mx-6 mb-5 p-4 rounded-xl bg-[#0a0b12] border border-[#1c1e2c]">
+                  <p className="text-[10px] font-semibold text-[#505272] uppercase tracking-wide mb-2.5">이런 경우에 사용하세요</p>
+                  <div className="flex flex-col gap-1.5">
+                    {skill.examples.map((ex, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <div className="w-1 h-1 rounded-full flex-shrink-0" style={{ background: skill.color }} />
+                        <span className="text-[11px] text-[#9a9cb8]">{ex}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 팁 */}
+              {skill.tip && (
+                <div className="mx-6 mb-5 flex items-start gap-2 p-3 rounded-xl"
+                  style={{ background: skill.color + '0d', border: `1px solid ${skill.color}20` }}>
+                  <span className="text-[10px] mt-0.5" style={{ color: skill.color }}>💡</span>
+                  <p className="text-[11px] leading-relaxed" style={{ color: skill.color + 'cc' }}>{skill.tip}</p>
+                </div>
+              )}
+
+              {/* 시작하기 버튼 */}
+              <div className="px-6 pb-6">
+                <button
+                  onClick={() => setShowIntro(false)}
+                  className="w-full text-[13px] font-medium text-white py-2.5 rounded-xl transition-all"
+                  style={{ background: skill.color }}
+                >
+                  시작하기
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              {/* ── 기본 입력 화면 ── */}
+              {/* Header */}
+              <div className="flex items-center gap-3 px-5 pt-5 pb-4 border-b border-[#1c1e2c]">
+                <div
+                  className="w-8 h-8 rounded-xl flex items-center justify-center text-base flex-shrink-0"
+                  style={{ background: skill.color + '22', color: skill.color }}
+                >
+                  {skill.icon}
+                </div>
+                <div>
+                  <p className="text-[13px] font-semibold text-[#e0e0f0]">{skill.label}</p>
+                  <p className="text-[11px] text-[#505272] mt-0.5">{skill.desc}</p>
+                </div>
+                <div className="flex-1" />
+                {/* 번역은 소개 화면으로 돌아가기 버튼 */}
+                {skill.id === 'translate' && (
+                  <button
+                    onClick={() => setShowIntro(true)}
+                    className="text-[10px] text-[#505272] hover:text-[#9a9cb8] px-2 py-1 rounded-lg hover:bg-[#14151e] transition-colors mr-1"
+                  >
+                    설명 보기
+                  </button>
+                )}
+                <button onClick={onClose} className="text-[#505272] hover:text-[#9a9cb8] transition-colors">
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                    <path d="M2 2l12 12M14 2L2 14"/>
+                  </svg>
+                </button>
+              </div>
+
+              {/* Input */}
+              <div className="px-5 py-4">
+                <label className="text-[11px] text-[#505272] font-medium mb-2 block">입력 내용</label>
+                <textarea
+                  value={input}
+                  onChange={e => setInput(e.target.value)}
+                  placeholder={`${skill.label}할 내용을 입력하거나 붙여넣기…`}
+                  className="w-full h-40 bg-[#0a0b12] border border-[#1c1e2c] rounded-xl px-3.5 py-3 text-[12px] text-[#d0d0e4] placeholder-[#3a3c58] focus:outline-none focus:border-[#3a3c6a] resize-none"
+                  autoFocus
+                  onKeyDown={e => {
+                    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') handleRun()
+                  }}
+                />
+                <p className="text-[10px] text-[#3a3c50] mt-1.5">⌘↵ 로 실행</p>
+              </div>
+
+              {/* Footer */}
+              <div className="px-5 pb-5 flex justify-end gap-2">
+                <button
+                  onClick={onClose}
+                  className="text-[12px] text-[#6b6e8c] hover:text-[#9a9cb8] px-4 py-2 rounded-xl hover:bg-[#14151e] transition-colors"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={handleRun}
+                  disabled={!input.trim()}
+                  className="text-[12px] font-medium text-white px-5 py-2 rounded-xl transition-all disabled:opacity-30"
+                  style={{ background: skill.color }}
+                >
+                  실행
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -253,6 +327,19 @@ export default function Skills() {
     skillCounts[o.skill_id] = (skillCounts[o.skill_id] || 0) + 1
   }
 
+  // Option A: 요약 스킬 호버 툴팁
+  const [tooltipSkillId, setTooltipSkillId] = useState(null)
+  const tooltipTimer = useRef(null)
+
+  function handleSkillMouseEnter(skill) {
+    if (skill.id !== 'summary') return
+    tooltipTimer.current = setTimeout(() => setTooltipSkillId(skill.id), 300)
+  }
+  function handleSkillMouseLeave() {
+    clearTimeout(tooltipTimer.current)
+    setTooltipSkillId(null)
+  }
+
   return (
     <div className="h-full flex flex-col overflow-hidden" style={{ background: 'var(--bg-base)' }}>
 
@@ -268,25 +355,53 @@ export default function Skills() {
         {/* Skill cards */}
         <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-5">
           {SKILLS.map(skill => (
-            <button
-              key={skill.id}
-              onClick={() => setActiveSkill(skill)}
-              className="group flex flex-col items-start gap-1.5 p-3 rounded-xl border border-[#1a1c28] hover:border-[#252840] bg-[#09090c] hover:bg-[#0d0e14] transition-all text-left"
-            >
-              <div
-                className="w-7 h-7 rounded-lg flex items-center justify-center text-sm transition-transform group-hover:scale-110"
-                style={{ background: skill.color + '22', color: skill.color }}
+            <div key={skill.id} className="relative">
+              <button
+                onClick={() => setActiveSkill(skill)}
+                onMouseEnter={() => handleSkillMouseEnter(skill)}
+                onMouseLeave={handleSkillMouseLeave}
+                className="group w-full flex flex-col items-start gap-1.5 p-3 rounded-xl border border-[#1a1c28] hover:border-[#252840] bg-[#09090c] hover:bg-[#0d0e14] transition-all text-left"
               >
-                {skill.icon}
-              </div>
-              <div>
-                <p className="text-[12px] font-medium text-[#c8c8d8] leading-none">{skill.label}</p>
-                <p className="text-[10px] text-[#505272] mt-1 leading-snug line-clamp-2">{skill.desc}</p>
-              </div>
-              {skillCounts[skill.id] > 0 && (
-                <span className="text-[9px] text-[#4a4c68] font-medium">{skillCounts[skill.id]}회 사용</span>
+                <div
+                  className="w-7 h-7 rounded-lg flex items-center justify-center text-sm transition-transform group-hover:scale-110"
+                  style={{ background: skill.color + '22', color: skill.color }}
+                >
+                  {skill.icon}
+                </div>
+                <div>
+                  <p className="text-[12px] font-medium text-[#c8c8d8] leading-none">{skill.label}</p>
+                  <p className="text-[10px] text-[#505272] mt-1 leading-snug line-clamp-2">{skill.desc}</p>
+                </div>
+                {skillCounts[skill.id] > 0 && (
+                  <span className="text-[9px] text-[#4a4c68] font-medium">{skillCounts[skill.id]}회 사용</span>
+                )}
+              </button>
+
+              {/* Option A: 요약 스킬 호버 툴팁 */}
+              {tooltipSkillId === skill.id && skill.detail && (
+                <div
+                  className="absolute bottom-full left-0 mb-2 z-50 w-56 rounded-xl border shadow-2xl pointer-events-none fade-in"
+                  style={{ background: '#0d0e18', borderColor: skill.color + '30' }}
+                >
+                  {/* 말풍선 꼬리 */}
+                  <div className="absolute -bottom-1.5 left-5 w-3 h-3 rotate-45 border-b border-r"
+                    style={{ background: '#0d0e18', borderColor: skill.color + '30' }} />
+
+                  <div className="p-3">
+                    {/* 헤더 */}
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-5 h-5 rounded-md flex items-center justify-center text-[10px]"
+                        style={{ background: skill.color + '20', color: skill.color }}>
+                        {skill.icon}
+                      </div>
+                      <span className="text-[11px] font-semibold" style={{ color: skill.color }}>{skill.label}</span>
+                    </div>
+                    {/* 설명 */}
+                    <p className="text-[11px] text-[#8082a0] leading-relaxed">{skill.detail}</p>
+                  </div>
+                </div>
               )}
-            </button>
+            </div>
           ))}
         </div>
       </div>
