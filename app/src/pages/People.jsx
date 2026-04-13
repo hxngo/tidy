@@ -55,6 +55,8 @@ export default function People() {
   const [confirmDelete, setConfirmDelete] = useState(null) // 삭제 확인 대상 person
   const [editingPerson, setEditingPerson] = useState(null) // null | 'new' | person
   const [editForm, setEditForm] = useState({ name: '', org: '', role: '', email: '' })
+  const [checkedIds, setCheckedIds] = useState(new Set()) // 다중 선택
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
 
   useEffect(() => {
     async function load() {
@@ -126,6 +128,32 @@ export default function People() {
     setConfirmDelete(null)
   }
 
+  async function handleBulkDelete() {
+    const targets = people.filter(p => checkedIds.has(p.id))
+    await Promise.all(targets.map(p => window.tidy?.people.delete(p.name)))
+    setPeople(prev => prev.filter(p => !checkedIds.has(p.id)))
+    if (checkedIds.has(selectedPerson?.id)) setSelectedPerson(null)
+    setCheckedIds(new Set())
+    setConfirmBulkDelete(false)
+  }
+
+  function toggleCheck(id, e) {
+    e.stopPropagation()
+    setCheckedIds(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  function toggleCheckAll() {
+    if (checkedIds.size === filtered.length) {
+      setCheckedIds(new Set())
+    } else {
+      setCheckedIds(new Set(filtered.map(p => p.id)))
+    }
+  }
+
   const filtered = search.trim()
     ? people.filter(
         (p) =>
@@ -142,6 +170,26 @@ export default function People() {
         <div className="no-drag flex items-center gap-2.5">
           <h1 className="text-[13px] font-semibold text-[#b8bacc] tracking-[-0.01em]">인물</h1>
           <span className="text-[11px] text-[#5a5c78]">{people.length}명</span>
+          {checkedIds.size > 0 && (
+            <>
+              <span className="text-[11px] text-[#6366f1] font-medium">{checkedIds.size}명 선택됨</span>
+              <button
+                onClick={() => setConfirmBulkDelete(true)}
+                className="flex items-center gap-1 text-[11px] text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/15 border border-red-500/20 rounded-lg px-2.5 py-1 transition-colors"
+              >
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M2 4h12M5 4V2h6v2M6 7v5M10 7v5M3 4l1 10h8l1-10"/>
+                </svg>
+                삭제
+              </button>
+              <button
+                onClick={() => setCheckedIds(new Set())}
+                className="text-[11px] text-[#5a5c78] hover:text-[#9a9cb8] transition-colors"
+              >
+                취소
+              </button>
+            </>
+          )}
         </div>
         <div className="no-drag flex items-center gap-2">
           <input
@@ -183,16 +231,59 @@ export default function People() {
             </div>
           ) : (
             <div className="p-3 space-y-1.5">
+              {/* 전체 선택 */}
+              <div className="flex items-center gap-2 px-1 pb-1">
+                <button
+                  onClick={toggleCheckAll}
+                  className="flex items-center gap-2 text-[10px] text-[#5a5c78] hover:text-[#9a9cb8] transition-colors"
+                >
+                  <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center transition-colors flex-shrink-0 ${
+                    checkedIds.size === filtered.length && filtered.length > 0
+                      ? 'bg-[#6366f1] border-[#6366f1]'
+                      : checkedIds.size > 0
+                        ? 'bg-[#6366f1]/40 border-[#6366f1]'
+                        : 'border-[#3a3c58]'
+                  }`}>
+                    {checkedIds.size > 0 && (
+                      <svg width="8" height="8" viewBox="0 0 10 8" fill="none">
+                        <path d={checkedIds.size === filtered.length ? 'M1 4L3.5 6.5L9 1' : 'M2 5h6'} stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    )}
+                  </div>
+                  전체 선택
+                </button>
+              </div>
+
               {filtered.map((person) => (
                 <div
                   key={person.id}
-                  className={`group flex items-center gap-3 w-full px-3 py-2.5 rounded-xl transition-all ${
-                    selectedPerson?.id === person.id
-                      ? 'border border-white/20 bg-white/6'
-                      : 'border border-[#1a1c28] hover:border-[#252840]'
+                  className={`group flex items-center gap-2 w-full px-3 py-2.5 rounded-xl transition-all ${
+                    checkedIds.has(person.id)
+                      ? 'border border-[#6366f1]/40 bg-[#6366f1]/8'
+                      : selectedPerson?.id === person.id
+                        ? 'border border-white/20 bg-white/6'
+                        : 'border border-[#1a1c28] hover:border-[#252840]'
                   }`}
-                  style={selectedPerson?.id !== person.id ? { background: 'var(--card-bg)' } : {}}
+                  style={!checkedIds.has(person.id) && selectedPerson?.id !== person.id ? { background: 'var(--card-bg)' } : {}}
                 >
+                  {/* 체크박스 */}
+                  <button
+                    onClick={(e) => toggleCheck(person.id, e)}
+                    className="flex-shrink-0 p-0.5"
+                  >
+                    <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center transition-colors ${
+                      checkedIds.has(person.id)
+                        ? 'bg-[#6366f1] border-[#6366f1]'
+                        : 'border-[#3a3c58] opacity-0 group-hover:opacity-100'
+                    }`}>
+                      {checkedIds.has(person.id) && (
+                        <svg width="8" height="8" viewBox="0 0 10 8" fill="none">
+                          <path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      )}
+                    </div>
+                  </button>
+
                   <button
                     className="flex items-center gap-3 flex-1 min-w-0 text-left"
                     onClick={() => handleSelectPerson(person)}
@@ -384,6 +475,41 @@ export default function People() {
                 className="flex-1 text-[12px] font-medium text-[#c8c8d0] bg-white/8 hover:bg-white/12 py-1.5 rounded-lg border border-white/10 transition-colors disabled:opacity-40"
               >
                 저장
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 일괄 삭제 확인 모달 */}
+      {confirmBulkDelete && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+          onClick={() => setConfirmBulkDelete(false)}
+        >
+          <div
+            className="bg-[#0f1018] border border-[#1c1e2a] rounded-2xl w-80 p-5 shadow-2xl fade-in"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-9 h-9 rounded-full bg-red-500/15 flex items-center justify-center mb-3">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#f87171" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M2 4h12M5 4V2h6v2M6 7v5M10 7v5M3 4l1 10h8l1-10"/>
+              </svg>
+            </div>
+            <p className="text-[13px] font-semibold text-[#e0e0f0] mb-1">{checkedIds.size}명 삭제</p>
+            <p className="text-[12px] text-[#6b6e8c] mb-4">선택한 인물이 Vault에서 영구 삭제됩니다.</p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setConfirmBulkDelete(false)}
+                className="flex-1 text-[12px] text-[#6b6e8c] hover:text-[#9a9cb8] py-1.5 rounded-lg border border-[#1a1c28] hover:border-[#252840] transition-colors"
+              >
+                취소
+              </button>
+              <button
+                onClick={handleBulkDelete}
+                className="flex-1 text-[12px] font-medium text-red-400 bg-red-500/10 hover:bg-red-500/20 py-1.5 rounded-lg border border-red-500/20 transition-colors"
+              >
+                {checkedIds.size}명 삭제
               </button>
             </div>
           </div>
