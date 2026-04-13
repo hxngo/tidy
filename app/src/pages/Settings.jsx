@@ -1,5 +1,5 @@
 import { useState, useEffect, useContext } from 'react'
-import { ThemeContext } from '../App.jsx'
+import { ThemeContext, FontSizeContext } from '../App.jsx'
 import { IconMail, IconMessage, IconKakao, IconIMessage, IconFile, IconClose, SourceIcon } from '../components/Icons.jsx'
 
 const TABS = [
@@ -28,6 +28,7 @@ function Toggle({ value, onChange }) {
 
 export default function Settings({ embedded = false }) {
   const { theme: currentTheme, setTheme } = useContext(ThemeContext)
+  const { fontSize, setFontSize } = useContext(FontSizeContext)
   const [tab, setTab] = useState('ai')
 
   const [settings, setSettings] = useState({
@@ -645,6 +646,45 @@ export default function Settings({ embedded = false }) {
                       {label}
                     </button>
                   ))}
+                </div>
+              </div>
+
+              {/* 글씨 크기 */}
+              <div>
+                <h2 className="text-sm font-semibold text-[#e5e5e5] mb-1">글씨 크기</h2>
+                <p className="text-xs text-[#737373] mb-3">앱 전체 텍스트 크기를 조절합니다</p>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setFontSize(fontSize - 0.1)}
+                    disabled={fontSize <= 0.8}
+                    className="w-7 h-7 rounded-lg border border-[#2a2a2a] text-[#9a9cb8] hover:border-[#3a3a3a] hover:text-white disabled:opacity-30 flex items-center justify-center text-base transition-colors"
+                  >−</button>
+                  <div className="flex-1 relative h-1.5 bg-[#2a2a2a] rounded-full">
+                    <div
+                      className="absolute left-0 top-0 h-full rounded-full bg-[#d4d4d8] transition-all"
+                      style={{ width: `${((fontSize - 0.8) / 0.6) * 100}%` }}
+                    />
+                    <input
+                      type="range"
+                      min={0.8} max={1.4} step={0.05}
+                      value={fontSize}
+                      onChange={e => setFontSize(parseFloat(e.target.value))}
+                      className="absolute inset-0 w-full opacity-0 cursor-pointer h-full"
+                    />
+                  </div>
+                  <button
+                    onClick={() => setFontSize(fontSize + 0.1)}
+                    disabled={fontSize >= 1.4}
+                    className="w-7 h-7 rounded-lg border border-[#2a2a2a] text-[#9a9cb8] hover:border-[#3a3a3a] hover:text-white disabled:opacity-30 flex items-center justify-center text-base transition-colors"
+                  >+</button>
+                  <span className="text-[12px] text-[#737373] w-10 text-right">{Math.round(fontSize * 100)}%</span>
+                  <button
+                    onClick={() => setFontSize(1)}
+                    className="text-[11px] text-[#505272] hover:text-[#9a9cb8] transition-colors"
+                  >초기화</button>
+                </div>
+                <div className="mt-3 px-3 py-2 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a]">
+                  <p className="text-[#9a9cb8]" style={{ fontSize: `${fontSize * 13}px` }}>미리보기 — 안녕하세요, Tidy입니다.</p>
                 </div>
               </div>
 

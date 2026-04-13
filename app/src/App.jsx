@@ -2,6 +2,7 @@ import { useState, useEffect, createContext, useContext } from 'react'
 import { HashRouter, Routes, Route, useNavigate } from 'react-router-dom'
 
 export const ThemeContext = createContext({ theme: 'auto', setTheme: () => {} })
+export const FontSizeContext = createContext({ fontSize: 1, setFontSize: () => {} })
 
 function useThemeManager() {
   const [theme, setTheme] = useState(() => localStorage.getItem('tidy-theme') || 'auto')
@@ -26,6 +27,22 @@ function useThemeManager() {
   }
 
   return [theme, updateTheme]
+}
+
+function useFontSizeManager() {
+  const [fontSize, setFontSize] = useState(() => parseFloat(localStorage.getItem('tidy-font-size') || '1'))
+
+  useEffect(() => {
+    document.documentElement.style.fontSize = `${fontSize * 100}%`
+  }, [fontSize])
+
+  function updateFontSize(val) {
+    const clamped = Math.min(1.4, Math.max(0.8, val))
+    localStorage.setItem('tidy-font-size', String(clamped))
+    setFontSize(clamped)
+  }
+
+  return [fontSize, updateFontSize]
 }
 import Onboarding from './pages/Onboarding.jsx'
 import TopBar from './components/TopBar.jsx'
@@ -130,6 +147,7 @@ function MainLayout() {
 
 export default function App() {
   const [theme, setTheme] = useThemeManager()
+  const [fontSize, setFontSize] = useFontSizeManager()
   const [onboardingDone, setOnboardingDone] = useState(null)
 
   useEffect(() => {
@@ -156,9 +174,11 @@ export default function App() {
 
   return (
     <ThemeContext.Provider value={{ theme, setTheme }}>
-      <HashRouter>
-        <MainLayout />
-      </HashRouter>
+      <FontSizeContext.Provider value={{ fontSize, setFontSize }}>
+        <HashRouter>
+          <MainLayout />
+        </HashRouter>
+      </FontSizeContext.Provider>
     </ThemeContext.Provider>
   )
 }
