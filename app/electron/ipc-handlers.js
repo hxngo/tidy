@@ -1465,17 +1465,25 @@ function setupIpcHandlers(ipcMain, getWindow) {
   })
 
   // ─── 스킬 실행 & 출력물 관리 ────────────────────────────────
-  ipcMain.handle('skill:run', async (_event, { skillId, input, sourceItemId }) => {
+  ipcMain.handle('skill:run', async (_event, { skillId, input, sourceItemId, messages }) => {
     try {
       const { runSkill } = require('./core/ai')
       const SKILL_LABELS = {
         summary: '요약', translate: '번역', minutes: '회의록', report: '보고서',
         kpi: 'KPI 현황', slides: '슬라이드', budget: '예산표', notebook: '노트', onboarding: '온보딩', hwp: '공문서(HWP)',
       }
-      const output = await runSkill(skillId, input)
-      const skillLabel = SKILL_LABELS[skillId] || skillId
-      const saved = vault.saveSkillOutput({ skillId, skillLabel, input, output, sourceItemId })
-      return { success: true, output, id: saved.id }
+      const result = await runSkill(skillId, input, { messages: messages || [] })
+      const { output, messages: nextMessages } = result
+
+      // 첫 번째 호출(messages 없음)에만 vault에 저장
+      let savedId = null
+      if (!messages || messages.length === 0) {
+        const skillLabel = SKILL_LABELS[skillId] || skillId
+        const saved = vault.saveSkillOutput({ skillId, skillLabel, input, output, sourceItemId })
+        savedId = saved.id
+      }
+
+      return { success: true, output, messages: nextMessages, id: savedId }
     } catch (error) {
       return { success: false, error: error.message }
     }

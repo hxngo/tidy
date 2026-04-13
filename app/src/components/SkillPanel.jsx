@@ -67,26 +67,36 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
   const skill = skillById(skillId)
   const isNlm = skill.type === 'nlm'
   const isTranslate = skillId === 'translate'
+  const isSummary = skillId === 'summary'
+  const isChatSkill = isTranslate || isSummary
 
-  // 번역 채팅 메시지 전송
-  const sendChatMessage = useCallback(async (text) => {
+  // 대화 히스토리 (Claude API messages 형식, 서버 전송용)
+  const [apiMessages, setApiMessages] = useState([])
+
+  // 번역/요약 채팅 메시지 전송
+  const sendChatMessage = useCallback(async (text, currentApiMessages) => {
     if (!text?.trim() || chatLoading) return
     const trimmed = text.trim()
     setChatMessages(prev => [...prev, { role: 'user', text: trimmed }])
     setChatInput('')
     setChatLoading(true)
     try {
-      const res = await window.tidy?.skills.run({ skillId: 'translate', input: trimmed })
+      const res = await window.tidy?.skills.run({
+        skillId,
+        input: trimmed,
+        messages: currentApiMessages || [],
+      })
       if (res?.success) {
         setChatMessages(prev => [...prev, { role: 'ai', text: res.output }])
+        setApiMessages(res.messages || [])
       } else {
-        setChatMessages(prev => [...prev, { role: 'error', text: res?.error || '번역 오류' }])
+        setChatMessages(prev => [...prev, { role: 'error', text: res?.error || '오류가 발생했습니다' }])
       }
     } catch (err) {
       setChatMessages(prev => [...prev, { role: 'error', text: err.message }])
     }
     setChatLoading(false)
-  }, [chatLoading])
+  }, [chatLoading, skillId])
 
   // 채팅 스크롤 자동 하단
   useEffect(() => {
@@ -100,12 +110,13 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
     if (prevSkillRef.current === key) return
     prevSkillRef.current = key
 
-    // 번역 스킬: 채팅 모드로 초기 메시지 전송
-    if (isTranslate) {
+    // 번역/요약 스킬: 채팅 모드로 초기 메시지 전송
+    if (isChatSkill) {
       setChatMessages([])
       setChatInput('')
       setChatLoading(false)
-      sendChatMessage(input)
+      setApiMessages([])
+      sendChatMessage(input, [])
       return
     }
 
@@ -191,6 +202,7 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
       setChatMessages([])
       setChatInput('')
       setChatLoading(false)
+      setApiMessages([])
     }
   }, [open])
 
@@ -272,13 +284,15 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
           </button>
         </div>
 
-        {/* ── 번역 채팅 모드 ── */}
-        {isTranslate && (
+        {/* ── 번역/요약 채팅 모드 ── */}
+        {isChatSkill && (
           <>
             <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-3">
               {/* 안내 헤더 */}
               <div className="flex items-center gap-2 pb-2 border-b border-[#1c1e2c]">
-                <span className="text-[10px] text-[#3a3c50]">한↔영 자동 감지 번역 · 계속 입력 가능</span>
+                <span className="text-[10px] text-[#3a3c50]">
+                  {isSummary ? '요약 결과 · 추가 질문 가능' : '한↔영 자동 감지 번역 · 계속 입력 가능'}
+                </span>
               </div>
 
               {/* 메시지 목록 */}
@@ -291,8 +305,8 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
                 <div className="flex items-start gap-2">
                   <div className="bg-[#14151e] border border-[#1c1e2c] rounded-2xl rounded-tl-sm px-4 py-3 flex gap-1.5 items-center">
                     {[0,1,2].map(i => (
-                      <div key={i} className="w-1.5 h-1.5 rounded-full bg-[#0ea5e9] animate-pulse"
-                        style={{ animationDelay: `${i * 180}ms` }} />
+                      <div key={i} className="w-1.5 h-1.5 rounded-full animate-pulse"
+                        style={{ background: isSummary ? skill.color : '#0ea5e9', animationDelay: `${i * 180}ms` }} />
                     ))}
                   </div>
                 </div>
@@ -303,7 +317,10 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
 
             {/* 채팅 입력창 */}
             <div className="px-4 pb-4 pt-2 border-t border-[#1c1e2c] flex-shrink-0">
-              <div className="flex items-end gap-2 bg-[#12131e] border border-[#1c1e2c] rounded-xl px-3 py-2 focus-within:border-[#0ea5e9]/40 transition-colors">
+              <div className="flex items-end gap-2 bg-[#12131e] border border-[#1c1e2c] rounded-xl px-3 py-2 transition-colors"
+                style={{ '--tw-border-opacity': 1 }}
+                onFocus={e => e.currentTarget.style.borderColor = (isSummary ? skill.color : '#0ea5e9') + '66'}
+                onBlur={e => e.currentTarget.style.borderColor = '#1c1e2c'}>
                 <textarea
                   ref={chatInputRef}
                   value={chatInput}
@@ -311,20 +328,20 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
                   onKeyDown={e => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault()
-                      sendChatMessage(chatInput)
+                      sendChatMessage(chatInput, apiMessages)
                     }
                   }}
-                  placeholder="번역할 텍스트 입력 (Enter로 전송, Shift+Enter 줄바꿈)"
+                  placeholder={isSummary ? '요약 결과에 대해 질문하세요 (Enter로 전송)' : '번역할 텍스트 입력 (Enter로 전송, Shift+Enter 줄바꿈)'}
                   rows={2}
                   className="flex-1 bg-transparent text-[12px] text-[#c0c2d8] placeholder-[#3a3c50] resize-none outline-none leading-relaxed min-h-[40px] max-h-[120px]"
                   style={{ fieldSizing: 'content' }}
                   disabled={chatLoading}
                 />
                 <button
-                  onClick={() => sendChatMessage(chatInput)}
+                  onClick={() => sendChatMessage(chatInput, apiMessages)}
                   disabled={chatLoading || !chatInput.trim()}
                   className="flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center transition-colors disabled:opacity-30"
-                  style={{ background: chatInput.trim() && !chatLoading ? '#0ea5e9' : '#1c1e2c' }}
+                  style={{ background: chatInput.trim() && !chatLoading ? (isSummary ? skill.color : '#0ea5e9') : '#1c1e2c' }}
                 >
                   <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M14 2L2 8l5 2 2 5 5-13z"/>
@@ -337,7 +354,7 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
         )}
 
         {/* Body */}
-        {!isTranslate && <div className="flex-1 overflow-y-auto px-5 py-4">
+        {!isChatSkill && <div className="flex-1 overflow-y-auto px-5 py-4">
 
           {/* ── 스킬 설명 카드 ── */}
           {skill.detail && state !== 'setup-required' && (
@@ -514,8 +531,8 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
           )}
         </div>}
 
-        {/* Footer — AI 스킬 완료 시만 표시 (번역 제외) */}
-        {!isTranslate && state === 'done' && (
+        {/* Footer — AI 스킬 완료 시만 표시 (번역/요약 제외) */}
+        {!isChatSkill && state === 'done' && (
           <div className="flex items-center gap-2 px-5 py-3.5 border-t border-[#1c1e2c] flex-shrink-0">
             <button
               onClick={handleCopy}

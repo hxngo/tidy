@@ -368,20 +368,36 @@ const SKILL_PROMPTS = {
 붙임: (첨부 목록, 해당 시)  끝.`,
 }
 
-async function runSkill(skillId, input) {
+async function runSkill(skillId, input, { messages = [] } = {}) {
   const client = getClient()
   const prompt = SKILL_PROMPTS[skillId]
   if (!prompt) throw new Error(`알 수 없는 스킬: ${skillId}`)
 
+  let conversationMessages
+  if (messages.length === 0) {
+    // 첫 번째 호출: 시스템 프롬프트 + 원문 포함
+    conversationMessages = [{
+      role: 'user',
+      content: `${prompt}\n\n---\n\n${input}`,
+    }]
+  } else {
+    // 후속 대화: 기존 히스토리에 새 메시지 추가
+    conversationMessages = [...messages, { role: 'user', content: input }]
+  }
+
   const msg = await client.messages.create({
     model: MODEL,
     max_tokens: 2048,
-    messages: [{
-      role: 'user',
-      content: `${prompt}\n\n---\n\n${input}`,
-    }],
+    messages: conversationMessages,
   })
-  return msg.content[0]?.text?.trim() || ''
+  const output = msg.content[0]?.text?.trim() || ''
+
+  // 다음 턴을 위한 대화 히스토리 반환
+  const nextMessages = [
+    ...conversationMessages,
+    { role: 'assistant', content: output },
+  ]
+  return { output, messages: nextMessages }
 }
 
 module.exports = { analyzeMessage, analyzeImageFile, processNlTaskAction, generateReplyDraft, generateWeeklyReport, runSkill }
