@@ -375,6 +375,8 @@ export default function Skills() {
                 {skillCounts[skill.id] > 0 && (
                   <span className="text-[9px] text-[#4a4c68] font-medium">{skillCounts[skill.id]}회 사용</span>
                 )}
+                {/* 디버그: 새 코드 확인용 */}
+                {skill.id === 'translate' && <span className="text-[8px] text-red-400">★NEW</span>}
               </button>
 
               {/* Option A: 요약 스킬 호버 툴팁 */}
