@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { SourceIcon, IconAttach, IconMic } from '../components/Icons.jsx'
 import { useSpeechToText } from '../hooks/useSpeechToText.js'
@@ -29,19 +29,7 @@ export default function Home() {
   const skillRunnerTextRef = useRef(null)
   const skillFileInputRef = useRef(null)
 
-  // Option A: 요약 스킬 호버 툴팁
-  const [tooltipSkillId, setTooltipSkillId] = useState(null)
-  const tooltipTimer = useRef(null)
-  const handleSkillHover = useCallback((skillId) => {
-    if (skillId !== 'summary') return
-    tooltipTimer.current = setTimeout(() => setTooltipSkillId(skillId), 300)
-  }, [])
-  const handleSkillLeave = useCallback(() => {
-    clearTimeout(tooltipTimer.current)
-    setTooltipSkillId(null)
-  }, [])
-
-  // Option B: 번역 스킬 소개 화면
+  // 스킬 소개 화면
   const [showSkillIntro, setShowSkillIntro] = useState(false)
 
   // 스킬 출력 패널
@@ -183,15 +171,14 @@ export default function Home() {
     }
   }
 
-  // 스킬 선택 → 실행 모달 열기
+  // 스킬 선택 → 소개 화면 먼저
   function openSkillRunner(skillId) {
     setSelectedSkillId(skillId)
     setSkillRunnerText(value.trim())
     setSkillRunnerFile(null)
     setSkillRunnerOpen(true)
-    setShowSkillIntro(skillId === 'translate') // Option B: 번역은 소개 화면 먼저
+    setShowSkillIntro(true) // 모든 스킬 소개 화면 먼저
     setShowSkillPicker(false)
-    if (skillId !== 'translate') setTimeout(() => skillRunnerTextRef.current?.focus(), 50)
   }
 
   // 스킬 모달 파일 첨부 처리
@@ -268,39 +255,19 @@ export default function Home() {
                 </div>
                 <div className="grid grid-cols-4 gap-1">
                   {AI_SKILLS.map(skill => (
-                    <div key={skill.id} className="relative">
-                      <button
-                        onClick={() => openSkillRunner(skill.id)}
-                        onMouseEnter={() => handleSkillHover(skill.id)}
-                        onMouseLeave={handleSkillLeave}
-                        className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-[#1a1c28] transition-colors text-left group"
-                      >
-                        <span className="w-5 h-5 rounded-md flex items-center justify-center text-[11px] flex-shrink-0"
-                          style={{ background: skill.color + '20', color: skill.color }}>
-                          {skill.icon}
-                        </span>
-                        <div className="min-w-0">
-                          <p className="text-[11px] font-medium text-[#9a9cb8] group-hover:text-[#d0d2e4] transition-colors truncate">{skill.label}</p>
-                        </div>
-                      </button>
-
-                      {/* Option A: 요약 호버 툴팁 */}
-                      {tooltipSkillId === skill.id && skill.detail && (
-                        <div className="absolute bottom-full left-0 mb-2 z-50 w-52 rounded-xl border shadow-2xl pointer-events-none fade-in"
-                          style={{ background: '#0d0e18', borderColor: skill.color + '30' }}>
-                          <div className="absolute -bottom-1.5 left-4 w-3 h-3 rotate-45 border-b border-r"
-                            style={{ background: '#0d0e18', borderColor: skill.color + '30' }} />
-                          <div className="p-3">
-                            <div className="flex items-center gap-1.5 mb-1.5">
-                              <span className="w-4 h-4 rounded flex items-center justify-center text-[9px]"
-                                style={{ background: skill.color + '20', color: skill.color }}>{skill.icon}</span>
-                              <span className="text-[10px] font-semibold" style={{ color: skill.color }}>{skill.label}</span>
-                            </div>
-                            <p className="text-[10px] text-[#8082a0] leading-relaxed">{skill.detail}</p>
-                          </div>
-                        </div>
-                      )}
-                    </div>
+                    <button
+                      key={skill.id}
+                      onClick={() => openSkillRunner(skill.id)}
+                      className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-[#1a1c28] transition-colors text-left group"
+                    >
+                      <span className="w-5 h-5 rounded-md flex items-center justify-center text-[11px] flex-shrink-0"
+                        style={{ background: skill.color + '20', color: skill.color }}>
+                        {skill.icon}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-medium text-[#9a9cb8] group-hover:text-[#d0d2e4] transition-colors truncate">{skill.label}</p>
+                      </div>
+                    </button>
                   ))}
                 </div>
               </div>
@@ -551,12 +518,10 @@ export default function Home() {
                 <p className="text-[13px] font-semibold text-[#e0e0f0]">{selectedSkill.label}</p>
                 <p className="text-[11px] text-[#505272]">{selectedSkill.desc}</p>
               </div>
-              {selectedSkillId === 'translate' && (
-                <button onClick={() => setShowSkillIntro(true)}
-                  className="text-[10px] text-[#505272] hover:text-[#9a9cb8] px-2 py-1 rounded-lg hover:bg-[#14151e] transition-colors mr-1">
-                  설명 보기
-                </button>
-              )}
+              <button onClick={() => setShowSkillIntro(true)}
+                className="text-[10px] text-[#505272] hover:text-[#9a9cb8] px-2 py-1 rounded-lg hover:bg-[#14151e] transition-colors mr-1">
+                설명 보기
+              </button>
               <button
                 onClick={() => setSkillRunnerOpen(false)}
                 className="text-[#505272] hover:text-[#9a9cb8] p-1 rounded transition-colors"
