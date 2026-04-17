@@ -33,7 +33,18 @@ function useFontSizeManager() {
   const [fontSize, setFontSize] = useState(() => parseFloat(localStorage.getItem('tidy-font-size') || '1'))
 
   useEffect(() => {
-    document.documentElement.style.fontSize = `${fontSize * 100}%`
+    const sizes = [8, 9, 10, 11, 12, 13, 14, 15, 16]
+    const css = sizes.map(px =>
+      `.text-\\[${px}px\\] { font-size: ${Math.round(px * fontSize)}px !important; }`
+    ).join('\n')
+
+    let style = document.getElementById('tidy-font-scale')
+    if (!style) {
+      style = document.createElement('style')
+      style.id = 'tidy-font-scale'
+      document.head.appendChild(style)
+    }
+    style.textContent = css
   }, [fontSize])
 
   function updateFontSize(val) {
@@ -52,6 +63,7 @@ import Tasks from './pages/Tasks.jsx'
 import People from './pages/People.jsx'
 import Settings from './pages/Settings.jsx'
 import Calendar from './pages/Calendar.jsx'
+import Skills from './pages/Skills.jsx'
 import FileDropZone from './components/FileDropZone.jsx'
 
 function MainLayout() {
@@ -137,6 +149,7 @@ function MainLayout() {
           <Route path="/tasks" element={<Tasks />} />
           <Route path="/people" element={<People />} />
           <Route path="/calendar" element={<Calendar />} />
+          <Route path="/skills" element={<Skills />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </div>
@@ -149,6 +162,18 @@ export default function App() {
   const [theme, setTheme] = useThemeManager()
   const [fontSize, setFontSize] = useFontSizeManager()
   const [onboardingDone, setOnboardingDone] = useState(null)
+
+  // 전역 드래그앤드롭 방어: 파일을 앱에 드롭했을 때 Electron이 file:// URL로 이동해
+  // 앱 화면이 검정/빈 화면으로 교체되는 것을 방지
+  useEffect(() => {
+    const preventNav = (e) => e.preventDefault()
+    document.addEventListener('dragover', preventNav)
+    document.addEventListener('drop', preventNav)
+    return () => {
+      document.removeEventListener('dragover', preventNav)
+      document.removeEventListener('drop', preventNav)
+    }
+  }, [])
 
   useEffect(() => {
     window.tidy?.onboarding.get()

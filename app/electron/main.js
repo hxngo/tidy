@@ -123,6 +123,44 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
   }
 
+  // ── 파일 드래그앤드롭 네비게이션 차단 ────────────────────────────────────────
+  // 개발 모드에서는 localhost:5173 리로드는 허용, 그 외(file:// mp4 등)는 전부 차단
+  // 프로덕션에서는 index.html 이외 file:// URL 차단
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const allow = isDev
+      ? url.startsWith('http://localhost:5173')
+      : url.includes('index.html')
+    if (!allow) {
+      event.preventDefault()
+      console.log('[Nav] 차단:', url)
+    }
+  })
+
+  // will-navigate로 막지 못한 경우 → goBack으로 복구 (loadURL은 자체적으로 검정화면 유발)
+  mainWindow.webContents.on('did-navigate', (_event, url) => {
+    const isApp = isDev
+      ? url.startsWith('http://localhost:5173')
+      : url.includes('index.html')
+    if (!isApp) {
+      console.log('[Nav] 이동 감지, goBack:', url)
+      if (mainWindow.webContents.canGoBack()) {
+        mainWindow.webContents.goBack()
+      } else {
+        // 히스토리가 없으면 어쩔 수 없이 reload
+        isDev
+          ? mainWindow.loadURL('http://localhost:5173')
+          : mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
+      }
+    }
+  })
+
+  // macOS hiddenInset + 네이티브 다이얼로그(파일선택창 등) 닫힐 때 검정 repaint 버그 방지
+  if (process.platform === 'darwin') {
+    mainWindow.on('focus', () => {
+      mainWindow.webContents.invalidate()
+    })
+  }
+
   // 창 닫기(X) → 숨기기 (종료 아님)
   mainWindow.on('close', (event) => {
     if (!app.isQuitting) {

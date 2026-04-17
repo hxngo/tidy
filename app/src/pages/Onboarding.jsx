@@ -1,36 +1,37 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   IconSearch, IconBook, IconList, IconLayers,
-  IconCheck, IconLock, IconClose, IconFolder,
+  IconCheck, IconLock,
   IconKakao, IconIMessage, IconTelegram, IconLine,
 } from '../components/Icons.jsx'
-
-const WORK_TYPES = [
-  { id: 'research', label: '리서치',    Icon: IconSearch },
-  { id: 'teaching', label: '티칭',      Icon: IconBook },
-  { id: 'project',  label: '프로젝트',  Icon: IconList },
-  { id: 'admin',    label: '운영',      Icon: IconLayers },
-]
 
 const TOTAL_STEPS = 5
 
 export default function Onboarding({ onComplete }) {
   const [step, setStep] = useState(1)
   const [apiKey, setApiKey] = useState('')
-  const [selectedWorkTypes, setSelectedWorkTypes] = useState([])
   const [vaultPath, setVaultPath] = useState('')
-  const [isDragging, setIsDragging] = useState(false)
-  const [importFiles, setImportFiles] = useState([])
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState(null)
-  // FDA 권한 상태: null=미확인, true=허용됨, false=미허용
   const [fdaStatus, setFdaStatus] = useState(null)
   const [isMac, setIsMac] = useState(false)
   const [requestingFda, setRequestingFda] = useState(false)
 
-  // Step 4 진입 시 권한 상태 확인
+  // ── Step 3: user_question_generator ──────────────────────────
+  const [chatHistory, setChatHistory] = useState([])   // { role, content }
+  const [chatInput, setChatInput] = useState('')
+  const [chatLoading, setChatLoading] = useState(false)
+  const [questionsDone, setQuestionsDone] = useState(false)
+  const chatEndRef = useRef(null)
+
+  // ── Step 4: Cold Start 확인 ───────────────────────────────────
+  const [analyzedProfile, setAnalyzedProfile] = useState(null)
+  const [analyzing, setAnalyzing] = useState(false)
+  const [profileConfirmed, setProfileConfirmed] = useState(false)
+
+  // FDA 권한 확인 (Step 5)
   useEffect(() => {
-    if (step === 4) {
+    if (step === 5) {
       window.tidy?.permissions.check().then((res) => {
         setIsMac(res?.platform === 'darwin')
         setFdaStatus(res?.hasAccess ?? true)
@@ -38,34 +39,93 @@ export default function Onboarding({ onComplete }) {
     }
   }, [step])
 
-  function toggleWorkType(id) {
-    setSelectedWorkTypes((prev) =>
-      prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]
-    )
+  // Step 3 진입 시 첫 질문 자동 생성
+  useEffect(() => {
+    if (step === 3 && chatHistory.length === 0) {
+      loadNextQuestion([])
+    }
+  }, [step])
+
+  // 챗 스크롤
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [chatHistory])
+
+  async function loadNextQuestion(history) {
+    setChatLoading(true)
+    try {
+      const answeredCount = history.filter(m => m.role === 'user').length
+      const res = await window.tidy?.profile.nextQuestion({ history, answeredCount })
+      if (res?.done) {
+        setQuestionsDone(true)
+      } else if (res?.question) {
+        setChatHistory(prev => [...prev, { role: 'assistant', content: res.question }])
+      }
+    } catch (e) {
+      setChatHistory(prev => [...prev, {
+        role: 'assistant',
+        content: '질문 생성 중 오류가 발생했습니다. 다음으로 진행해 주세요.',
+      }])
+      setQuestionsDone(true)
+    } finally {
+      setChatLoading(false)
+    }
   }
 
-  function handleDragOver(e) {
-    e.preventDefault()
-    setIsDragging(true)
+  async function handleChatSubmit(e) {
+    e?.preventDefault()
+    const text = chatInput.trim()
+    if (!text || chatLoading) return
+    setChatInput('')
+    const newHistory = [...chatHistory, { role: 'user', content: text }]
+    setChatHistory(newHistory)
+    await loadNextQuestion(newHistory)
   }
 
-  function handleDragLeave() {
-    setIsDragging(false)
+  // Step 4: 대화 기반 프로필 분석
+  async function handleAnalyze() {
+    setAnalyzing(true)
+    try {
+      const res = await window.tidy?.profile.analyze({ history: chatHistory })
+      if (res?.profile) {
+        setAnalyzedProfile(res.profile)
+        setStep(4)
+      }
+    } catch (e) {
+      setError('프로필 분석 중 오류: ' + e.message)
+    } finally {
+      setAnalyzing(false)
+    }
   }
 
-  function handleDrop(e) {
-    e.preventDefault()
-    setIsDragging(false)
-    const files = Array.from(e.dataTransfer.files)
-    setImportFiles((prev) => {
-      const existing = new Set(prev.map((f) => f.path))
-      const newFiles = files.filter((f) => !existing.has(f.path))
-      return [...prev, ...newFiles]
-    })
+  // Step 4: 프로필 확인 후 저장
+  async function handleConfirmProfile() {
+    if (!analyzedProfile) return
+    await window.tidy?.profile.save(analyzedProfile)
+    // people vault에 팀원 등록
+    for (const name of analyzedProfile.teammates || []) {
+      if (name) await window.tidy?.people.upsert({ name })
+    }
+    setProfileConfirmed(true)
+    setStep(5)
   }
 
-  function removeImportFile(index) {
-    setImportFiles((prev) => prev.filter((_, i) => i !== index))
+  async function handleComplete() {
+    setIsSubmitting(true)
+    setError(null)
+    try {
+      const result = await window.tidy?.onboarding.complete({
+        apiKey: apiKey.trim(),
+        workTypes: analyzedProfile?.workTypes || [],
+        vaultPath: vaultPath.trim(),
+      })
+      if (result?.error) { setError(result.error); setIsSubmitting(false); return }
+      onComplete()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   async function handleRequestFDA() {
@@ -78,42 +138,23 @@ export default function Onboarding({ onComplete }) {
     }
   }
 
-  async function handleComplete(skip = false) {
-    setIsSubmitting(true)
-    setError(null)
-    try {
-      // 온보딩 데이터 저장
-      const result = await window.tidy?.onboarding.complete({
-        apiKey: apiKey.trim(),
-        workTypes: selectedWorkTypes,
-        vaultPath: vaultPath.trim(),
-      })
-
-      if (result?.error) {
-        setError(result.error)
-        setIsSubmitting(false)
-        return
-      }
-
-      // 파일 가져오기 (스킵하지 않았고 파일이 있을 때)
-      if (!skip && importFiles.length > 0) {
-        await window.tidy?.onboarding.import({
-          filePaths: importFiles.map((f) => f.path),
-        })
-      }
-
-      onComplete()
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setIsSubmitting(false)
-    }
+  // 프로필 항목 렌더 헬퍼
+  function ProfileRow({ label, value }) {
+    if (!value || (Array.isArray(value) && value.length === 0)) return null
+    return (
+      <div className="flex gap-3 py-2 border-b border-[#222]">
+        <span className="text-xs text-[#555] w-20 flex-shrink-0 pt-0.5">{label}</span>
+        <span className="text-xs text-[#c8c8d8] flex-1">
+          {Array.isArray(value) ? value.join(', ') : value}
+        </span>
+      </div>
+    )
   }
 
   return (
     <div className="h-screen bg-[#0f0f0f] flex items-center justify-center p-6">
       <div className="w-full max-w-md">
-        {/* 단계 표시 */}
+        {/* 진행 바 */}
         <div className="flex items-center justify-center gap-2 mb-8">
           {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
             <div
@@ -125,21 +166,18 @@ export default function Onboarding({ onComplete }) {
           ))}
         </div>
 
-        {/* 카드 */}
-        <div className="bg-[#161616] border border-[#2a2a2a] rounded-2xl p-8">
-          {/* 단계 레이블 */}
-          <p className="text-xs text-[#404040] mb-6 text-center">
+        <div className={`bg-[#161616] border border-[#2a2a2a] rounded-2xl ${step === 3 ? 'p-0 overflow-hidden' : 'p-8'}`}>
+          <p className={`text-xs text-[#404040] mb-6 text-center ${step === 3 ? 'pt-6' : ''}`}>
             {step} / {TOTAL_STEPS}
           </p>
 
-          {/* 에러 */}
           {error && (
-            <div className="mb-4 px-4 py-3 bg-red-900/30 border border-red-700/50 rounded-lg text-sm text-red-300">
+            <div className="mb-4 mx-8 px-4 py-3 bg-red-900/30 border border-red-700/50 rounded-lg text-sm text-red-300">
               {error}
             </div>
           )}
 
-          {/* ─── Step 1: 환영 ─── */}
+          {/* ─── Step 1: 환영 ───────────────────────────────── */}
           {step === 1 && (
             <div className="text-center">
               <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6">
@@ -157,127 +195,164 @@ export default function Onboarding({ onComplete }) {
               </p>
               <button
                 onClick={() => setStep(2)}
-                className="w-full py-3 bg-[#d4d4d8] text-white text-sm font-medium rounded-xl hover:bg-[#b8b8c0] transition-colors"
+                className="w-full py-3 bg-[#d4d4d8] text-[#111111] text-sm font-medium rounded-xl hover:bg-[#b8b8c0] transition-colors"
               >
                 시작하기
               </button>
             </div>
           )}
 
-          {/* ─── Step 2: API 설정 ─── */}
+          {/* ─── Step 2: API 키 ──────────────────────────────── */}
           {step === 2 && (
             <div>
               <h2 className="text-xl font-bold text-[#e5e5e5] mb-2">Claude API 키 설정</h2>
               <p className="text-sm text-[#737373] mb-6">
                 메시지 분석·요약·태스크 추출에 사용됩니다.
               </p>
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-xs text-[#737373] mb-1.5">
-                    Anthropic API 키
-                  </label>
-                  <input
-                    type="password"
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    placeholder="sk-ant-..."
-                    className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2.5 text-sm text-[#e5e5e5] placeholder-[#404040] focus:outline-none focus:border-white/40 transition-colors"
-                  />
-                  <p className="text-xs text-[#404040] mt-1.5">
-                    console.anthropic.com에서 발급받을 수 있습니다
-                  </p>
-                </div>
-              </div>
-              <div className="flex gap-3 mt-8">
-                <button
-                  onClick={() => setStep(1)}
-                  className="flex-1 py-2.5 bg-[#1a1a1a] border border-[#2a2a2a] text-[#737373] text-sm rounded-xl hover:text-[#e5e5e5] transition-colors"
-                >
-                  이전
-                </button>
-                <button
-                  onClick={() => setStep(3)}
-                  disabled={!apiKey.trim()}
-                  className="flex-1 py-2.5 bg-[#d4d4d8] text-white text-sm rounded-xl hover:bg-[#b8b8c0] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                >
-                  다음
-                </button>
-              </div>
-              <button
-                onClick={() => setStep(3)}
-                className="w-full mt-2 text-xs text-[#404040] hover:text-[#737373] transition-colors py-1"
-              >
-                나중에 설정하기
-              </button>
-            </div>
-          )}
-
-          {/* ─── Step 3: 업무 프로필 ─── */}
-          {step === 3 && (
-            <div>
-              <h2 className="text-xl font-bold text-[#e5e5e5] mb-2">업무 프로필</h2>
-              <p className="text-sm text-[#737373] mb-6">
-                어떤 유형의 업무를 주로 처리하시나요? (복수 선택 가능)
-              </p>
-
-              {/* 업무 유형 체크박스 */}
-              <div className="grid grid-cols-2 gap-2 mb-6">
-                {WORK_TYPES.map(({ id, label, Icon: WorkIcon }) => {
-                  const isSelected = selectedWorkTypes.includes(id)
-                  return (
-                    <button
-                      key={id}
-                      onClick={() => toggleWorkType(id)}
-                      className={`flex items-center gap-2 px-4 py-3 rounded-xl border text-sm transition-colors ${
-                        isSelected
-                          ? 'bg-white/10 border-white/30 text-[#c8c8d0]'
-                          : 'bg-[#1a1a1a] border-[#2a2a2a] text-[#737373] hover:border-[#404040] hover:text-[#e5e5e5]'
-                      }`}
-                    >
-                      <WorkIcon size={14} />
-                      <span>{label}</span>
-                    </button>
-                  )
-                })}
-              </div>
-
-              {/* vault 경로 */}
               <div>
-                <label className="block text-xs text-[#737373] mb-1.5">
-                  Vault 저장 경로
-                  <span className="ml-1 text-[#404040]">(선택사항)</span>
-                </label>
+                <label className="block text-xs text-[#737373] mb-1.5">Anthropic API 키</label>
                 <input
-                  type="text"
-                  value={vaultPath}
-                  onChange={(e) => setVaultPath(e.target.value)}
-                  placeholder="~/tidy-vault (기본값)"
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="sk-ant-..."
                   className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2.5 text-sm text-[#e5e5e5] placeholder-[#404040] focus:outline-none focus:border-white/40 transition-colors"
                 />
                 <p className="text-xs text-[#404040] mt-1.5">
-                  Obsidian vault와 동일한 경로 사용 가능
+                  console.anthropic.com에서 발급받을 수 있습니다
                 </p>
               </div>
-
               <div className="flex gap-3 mt-8">
+                <button onClick={() => setStep(1)} className="flex-1 py-2.5 bg-[#1a1a1a] border border-[#2a2a2a] text-[#737373] text-sm rounded-xl hover:text-[#e5e5e5] transition-colors">이전</button>
+                <button onClick={() => setStep(3)} disabled={!apiKey.trim()} className="flex-1 py-2.5 bg-[#d4d4d8] text-[#111111] text-sm rounded-xl hover:bg-[#b8b8c0] disabled:opacity-40 disabled:cursor-not-allowed transition-colors">다음</button>
+              </div>
+              <button onClick={() => setStep(3)} className="w-full mt-2 text-xs text-[#404040] hover:text-[#737373] transition-colors py-1">나중에 설정하기</button>
+            </div>
+          )}
+
+          {/* ─── Step 3: user_question_generator ────────────── */}
+          {step === 3 && (
+            <div className="flex flex-col h-[480px]">
+              <div className="px-6 pb-3 border-b border-[#222]">
+                <h2 className="text-base font-semibold text-[#e5e5e5]">업무 파악</h2>
+                <p className="text-xs text-[#555] mt-0.5">AI가 몇 가지 질문을 드릴게요 (5~7개)</p>
+              </div>
+
+              {/* 챗 영역 */}
+              <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
+                {chatHistory.map((msg, i) => (
+                  <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[80%] px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed ${
+                      msg.role === 'user'
+                        ? 'bg-[#d4d4d8] text-[#111] rounded-br-sm'
+                        : 'bg-[#1e1e2e] text-[#c8c8d8] rounded-bl-sm'
+                    }`}>
+                      {msg.content}
+                    </div>
+                  </div>
+                ))}
+
+                {chatLoading && (
+                  <div className="flex justify-start">
+                    <div className="bg-[#1e1e2e] text-[#555] px-4 py-2.5 rounded-2xl rounded-bl-sm text-sm">
+                      <span className="animate-pulse">···</span>
+                    </div>
+                  </div>
+                )}
+
+                {questionsDone && !chatLoading && (
+                  <div className="flex justify-center pt-2">
+                    <div className="text-xs text-[#555] bg-[#1a1a1a] px-3 py-1.5 rounded-full">
+                      질문이 완료됐습니다
+                    </div>
+                  </div>
+                )}
+
+                <div ref={chatEndRef} />
+              </div>
+
+              {/* 입력 영역 */}
+              <div className="px-4 pb-4 pt-2 border-t border-[#222]">
+                {!questionsDone ? (
+                  <form onSubmit={handleChatSubmit} className="flex gap-2">
+                    <input
+                      type="text"
+                      value={chatInput}
+                      onChange={(e) => setChatInput(e.target.value)}
+                      disabled={chatLoading}
+                      placeholder="답변을 입력하세요..."
+                      className="flex-1 bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-3 py-2 text-sm text-[#e5e5e5] placeholder-[#404040] focus:outline-none focus:border-[#404040] disabled:opacity-40 transition-colors"
+                      autoFocus
+                    />
+                    <button
+                      type="submit"
+                      disabled={!chatInput.trim() || chatLoading}
+                      className="w-9 h-9 bg-[#d4d4d8] text-[#111] rounded-xl disabled:opacity-30 flex items-center justify-center transition-colors"
+                    >
+                      ↵
+                    </button>
+                  </form>
+                ) : (
+                  <div className="flex gap-2">
+                    <button onClick={() => setStep(2)} className="flex-1 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#737373] text-sm rounded-xl hover:text-[#e5e5e5] transition-colors">이전</button>
+                    <button
+                      onClick={handleAnalyze}
+                      disabled={analyzing}
+                      className="flex-[2] py-2 bg-[#d4d4d8] text-[#111] text-sm font-medium rounded-xl hover:bg-[#b8b8c0] disabled:opacity-40 transition-colors"
+                    >
+                      {analyzing ? '분석 중...' : '프로필 분석'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ─── Step 4: Cold Start 확인 루프 ───────────────── */}
+          {step === 4 && analyzedProfile && (
+            <div>
+              <h2 className="text-xl font-bold text-[#e5e5e5] mb-1">분석 결과 확인</h2>
+              <p className="text-sm text-[#737373] mb-5">AI가 파악한 내용이 맞나요?</p>
+
+              <div className="bg-[#111] border border-[#222] rounded-xl px-4 py-3 mb-5 space-y-0 max-h-56 overflow-y-auto">
+                <ProfileRow label="이름" value={analyzedProfile.name} />
+                <ProfileRow label="직책" value={analyzedProfile.title} />
+                <ProfileRow label="부서" value={analyzedProfile.department} />
+                <ProfileRow label="회사" value={analyzedProfile.company} />
+                <ProfileRow label="업계" value={analyzedProfile.industry} />
+                <ProfileRow label="프로젝트" value={analyzedProfile.projects} />
+                <ProfileRow label="주요 업무" value={analyzedProfile.workTypes} />
+                <ProfileRow label="팀원" value={analyzedProfile.teammates} />
+                <ProfileRow label="거래처" value={analyzedProfile.clients} />
+                <ProfileRow label="소통 방식" value={analyzedProfile.communication} />
+                <ProfileRow label="키워드" value={analyzedProfile.domain_keywords} />
+              </div>
+
+              {analyzedProfile.summary && (
+                <p className="text-xs text-[#6366f1] bg-[#1a1c2e] border border-[#2a2c40] px-3 py-2 rounded-lg mb-5">
+                  💡 {analyzedProfile.summary}
+                </p>
+              )}
+
+              <div className="flex gap-3">
                 <button
-                  onClick={() => setStep(2)}
+                  onClick={() => { setStep(3); setQuestionsDone(false) }}
                   className="flex-1 py-2.5 bg-[#1a1a1a] border border-[#2a2a2a] text-[#737373] text-sm rounded-xl hover:text-[#e5e5e5] transition-colors"
                 >
-                  이전
+                  다시 입력
                 </button>
                 <button
-                  onClick={() => setStep(4)}
-                  className="flex-1 py-2.5 bg-[#d4d4d8] text-white text-sm rounded-xl hover:bg-[#b8b8c0] transition-colors"
+                  onClick={handleConfirmProfile}
+                  className="flex-[2] py-2.5 bg-[#d4d4d8] text-[#111] text-sm font-medium rounded-xl hover:bg-[#b8b8c0] transition-colors"
                 >
-                  다음
+                  맞습니다 →
                 </button>
               </div>
             </div>
           )}
 
-          {/* ─── Step 4: 알림 권한 ─── */}
-          {step === 4 && (
+          {/* ─── Step 5: 알림 권한 ──────────────────────────── */}
+          {step === 5 && (
             <div>
               <h2 className="text-xl font-bold text-[#e5e5e5] mb-2">알림 자동 감지</h2>
               <p className="text-sm text-[#737373] mb-6">
@@ -286,14 +361,11 @@ export default function Onboarding({ onComplete }) {
 
               {isMac ? (
                 <div className="space-y-4">
-                  {/* 권한 상태 카드 */}
-                  <div className={`p-4 rounded-xl border transition-colors ${
-                    fdaStatus
-                      ? 'bg-green-900/20 border-green-700/40'
-                      : 'bg-[#1a1a1a] border-[#2a2a2a]'
-                  }`}>
+                  <div className={`p-4 rounded-xl border transition-colors ${fdaStatus ? 'bg-green-900/20 border-green-700/40' : 'bg-[#1a1a1a] border-[#2a2a2a]'}`}>
                     <div className="flex items-start gap-3">
-                      <span className="mt-0.5 text-[#737373]">{fdaStatus ? <IconCheck size={20} className="text-green-400" /> : <IconLock size={20} />}</span>
+                      <span className="mt-0.5 text-[#737373]">
+                        {fdaStatus ? <IconCheck size={20} className="text-green-400" /> : <IconLock size={20} />}
+                      </span>
                       <div className="flex-1">
                         <p className="text-sm font-medium text-[#e5e5e5] mb-1">
                           전체 디스크 접근
@@ -305,19 +377,13 @@ export default function Onboarding({ onComplete }) {
                             : 'macOS 시스템 설정 → 개인 정보 보호 및 보안 → 전체 디스크 접근에서 Tidy를 허용해 주세요.'}
                         </p>
                         {!fdaStatus && (
-                          <button
-                            onClick={handleRequestFDA}
-                            disabled={requestingFda}
-                            className="px-4 py-2 bg-[#d4d4d8] text-white text-xs font-medium rounded-lg hover:bg-[#b8b8c0] disabled:opacity-40 transition-colors"
-                          >
+                          <button onClick={handleRequestFDA} disabled={requestingFda} className="px-4 py-2 bg-[#d4d4d8] text-[#111] text-xs font-medium rounded-lg hover:bg-[#b8b8c0] disabled:opacity-40 transition-colors">
                             {requestingFda ? '시스템 설정 열는 중...' : '시스템 설정 열기'}
                           </button>
                         )}
                       </div>
                     </div>
                   </div>
-
-                  {/* 지원 앱 목록 */}
                   <div className="grid grid-cols-2 gap-2">
                     {[
                       { Icon: IconKakao,    name: '카카오톡' },
@@ -331,122 +397,24 @@ export default function Onboarding({ onComplete }) {
                       </div>
                     ))}
                   </div>
-
                   <p className="text-xs text-[#404040]">
                     권한 허용 후 앱을 재시작하면 자동 감지가 활성화됩니다.
-                    설정 → 알림 자동 감지에서 개별 앱을 켜고 끌 수 있습니다.
                   </p>
                 </div>
               ) : (
                 <div className="p-4 bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl">
                   <p className="text-sm text-[#737373]">
-                    알림 자동 감지는 macOS에서만 지원됩니다.
-                    Gmail, Slack은 설정에서 연결할 수 있습니다.
+                    알림 자동 감지는 macOS에서만 지원됩니다. Gmail, Slack은 설정에서 연결할 수 있습니다.
                   </p>
                 </div>
               )}
 
               <div className="flex gap-3 mt-8">
-                <button
-                  onClick={() => setStep(3)}
-                  className="flex-1 py-2.5 bg-[#1a1a1a] border border-[#2a2a2a] text-[#737373] text-sm rounded-xl hover:text-[#e5e5e5] transition-colors"
-                >
-                  이전
-                </button>
-                <button
-                  onClick={() => setStep(5)}
-                  className="flex-1 py-2.5 bg-[#d4d4d8] text-white text-sm rounded-xl hover:bg-[#b8b8c0] transition-colors"
-                >
-                  {fdaStatus ? '다음' : '나중에 설정'}
+                <button onClick={() => setStep(4)} className="flex-1 py-2.5 bg-[#1a1a1a] border border-[#2a2a2a] text-[#737373] text-sm rounded-xl hover:text-[#e5e5e5] transition-colors">이전</button>
+                <button onClick={handleComplete} disabled={isSubmitting} className="flex-1 py-2.5 bg-[#d4d4d8] text-[#111] text-sm rounded-xl hover:bg-[#b8b8c0] disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                  {isSubmitting ? '저장 중...' : fdaStatus ? '완료' : '나중에 설정'}
                 </button>
               </div>
-            </div>
-          )}
-
-          {/* ─── Step 5: 데이터 가져오기 ─── */}
-          {step === 5 && (
-            <div>
-              <h2 className="text-xl font-bold text-[#e5e5e5] mb-2">데이터 가져오기</h2>
-              <p className="text-sm text-[#737373] mb-6">
-                기존 연락처, 카카오톡, 이메일 파일을 가져올 수 있습니다.
-              </p>
-
-              {/* 드래그&드롭 영역 */}
-              <div
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-                className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer ${
-                  isDragging
-                    ? 'border-[#c8c8d0] bg-white/8'
-                    : 'border-[#2a2a2a] bg-[#1a1a1a] hover:border-[#404040]'
-                }`}
-              >
-                <IconFolder size={32} className="text-[#404040] mx-auto mb-2" />
-                <p className="text-sm font-medium text-[#e5e5e5] mb-1">
-                  파일을 여기에 드래그하세요
-                </p>
-                <p className="text-xs text-[#404040]">
-                  TXT (카카오톡), EML (이메일), PDF, DOCX 지원
-                </p>
-              </div>
-
-              {/* 가져올 파일 목록 */}
-              {importFiles.length > 0 && (
-                <ul className="mt-3 space-y-1.5">
-                  {importFiles.map((file, i) => (
-                    <li
-                      key={i}
-                      className="flex items-center justify-between bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2"
-                    >
-                      <span className="text-xs text-[#a0a0a0] truncate max-w-[280px]">
-                        {file.name}
-                      </span>
-                      <button
-                        onClick={() => removeImportFile(i)}
-                        className="text-[#404040] hover:text-red-400 transition-colors ml-2 flex-shrink-0"
-                      >
-                        <IconClose size={12} />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-
-              <div className="flex gap-3 mt-8">
-                <button
-                  onClick={() => setStep(4)}
-                  className="flex-1 py-2.5 bg-[#1a1a1a] border border-[#2a2a2a] text-[#737373] text-sm rounded-xl hover:text-[#e5e5e5] transition-colors"
-                  disabled={isSubmitting}
-                >
-                  이전
-                </button>
-                {importFiles.length > 0 ? (
-                  <button
-                    onClick={() => handleComplete(false)}
-                    disabled={isSubmitting}
-                    className="flex-1 py-2.5 bg-[#d4d4d8] text-white text-sm rounded-xl hover:bg-[#b8b8c0] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                  >
-                    {isSubmitting ? '처리 중...' : `${importFiles.length}개 파일 가져오기`}
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => handleComplete(true)}
-                    disabled={isSubmitting}
-                    className="flex-1 py-2.5 bg-[#d4d4d8] text-white text-sm rounded-xl hover:bg-[#b8b8c0] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                  >
-                    {isSubmitting ? '저장 중...' : '완료'}
-                  </button>
-                )}
-              </div>
-
-              <button
-                onClick={() => handleComplete(true)}
-                disabled={isSubmitting}
-                className="w-full mt-2 text-xs text-[#404040] hover:text-[#737373] transition-colors py-1 disabled:opacity-40"
-              >
-                가져오기 건너뛰기
-              </button>
             </div>
           )}
         </div>

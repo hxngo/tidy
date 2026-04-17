@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { SourceIcon, IconAttach, IconMic } from '../components/Icons.jsx'
 import { useSpeechToText } from '../hooks/useSpeechToText.js'
-import { SKILLS, AI_SKILLS, NLM_SKILLS } from '../components/SkillPanel.jsx'
+import { SKILLS, AI_SKILLS, NLM_SKILLS, setCustomSkillsCache } from '../components/SkillPanel.jsx'
 import SkillPanel from '../components/SkillPanel.jsx'
 
 const SUGGESTIONS = [
@@ -36,6 +36,13 @@ export default function Home() {
   const [skillPanelOpen, setSkillPanelOpen] = useState(false)
   const [skillPanelInput, setSkillPanelInput] = useState('')
 
+  const [attachedFiles, setAttachedFiles] = useState([]) // { path, name }
+
+  // 커스텀 스킬
+  const [customSkills, setCustomSkills] = useState([])
+  const [showCreateSkill, setShowCreateSkill] = useState(false)
+  const [editingSkill, setEditingSkill] = useState(null) // 수정 중인 커스텀 스킬
+
   const inputRef = useRef(null)
   const fileInputRef = useRef(null)
   const pickerRef = useRef(null)
@@ -50,6 +57,13 @@ export default function Home() {
     },
   })
 
+  // 커스텀 스킬 로드 헬퍼
+  async function loadCustomSkills() {
+    const list = await window.tidy?.skills.listCustom?.() || []
+    setCustomSkills(list)
+    setCustomSkillsCache(list)
+  }
+
   useEffect(() => {
     inputRef.current?.focus()
 
@@ -58,6 +72,8 @@ export default function Home() {
         setRecentItems(data.filter((i) => i.status === 'new').slice(0, 5))
       }
     }).catch(() => {})
+
+    loadCustomSkills()
 
     const unsub = window.tidy?.inbox.onNewItem((item) => {
       if (item?.status === 'new') {
@@ -120,20 +136,35 @@ export default function Home() {
   async function handleSubmit(e) {
     e?.preventDefault()
     const text = value.trim()
-    if (!text || isLoading) return
+    if ((!text && attachedFiles.length === 0) || isLoading) return
     setShowSkillPicker(false)
     setIsLoading(true)
     setResult(null)
     try {
-      const res = await window.tidy?.tasks.nlAction(text)
-      if (res?.result?.message) {
-        setResult({ type: 'ok', message: res.result.message })
-      } else if (res?.error) {
-        setResult({ type: 'err', message: res.error })
+      // 파일이 있으면 먼저 업로드
+      if (attachedFiles.length > 0) {
+        const results = await Promise.all(attachedFiles.map(f => window.tidy?.inbox.upload(f.path, text || undefined)))
+        const ok = results.filter(r => r?.success).length
+        const fail = results.length - ok
+        setResult({
+          type: fail === 0 ? 'ok' : 'err',
+          message: fail === 0 ? `${ok}개 파일 분석 완료 — 인박스에서 확인하세요` : `${ok}개 성공, ${fail}개 실패`,
+        })
+        setAttachedFiles([])
+        setValue('')
+        if (ok > 0) setTimeout(() => navigate('/inbox'), 1200)
       } else {
-        setResult({ type: 'ok', message: '처리 완료' })
+        // 텍스트만 있는 경우
+        const res = await window.tidy?.tasks.nlAction(text)
+        if (res?.result?.message) {
+          setResult({ type: 'ok', message: res.result.message })
+        } else if (res?.error) {
+          setResult({ type: 'err', message: res.error })
+        } else {
+          setResult({ type: 'ok', message: '처리 완료' })
+        }
+        setValue('')
       }
-      setValue('')
     } catch (err) {
       setResult({ type: 'err', message: err.message })
     } finally {
@@ -142,26 +173,15 @@ export default function Home() {
     }
   }
 
-  async function handleFiles(files) {
+  function handleFiles(files) {
     const arr = Array.from(files)
     if (!arr.length) return
-    setIsLoading(true)
-    setResult(null)
-    try {
-      const results = await Promise.all(arr.map((f) => window.tidy?.inbox.upload(f.path)))
-      const ok = results.filter((r) => r?.success).length
-      const fail = results.length - ok
-      setResult({
-        type: fail === 0 ? 'ok' : 'err',
-        message: fail === 0 ? `${ok}개 파일 분석 완료 — 인박스에서 확인하세요` : `${ok}개 성공, ${fail}개 실패`,
-      })
-      setTimeout(() => setResult(null), 5000)
-      if (ok > 0) setTimeout(() => navigate('/inbox'), 1200)
-    } catch (err) {
-      setResult({ type: 'err', message: err.message })
-    } finally {
-      setIsLoading(false)
-    }
+    setAttachedFiles(prev => {
+      const existing = new Set(prev.map(f => f.path))
+      const newFiles = arr.filter(f => !existing.has(f.path)).map(f => ({ path: f.path, name: f.name }))
+      return [...prev, ...newFiles]
+    })
+    inputRef.current?.focus()
   }
 
   function handleKeyDown(e) {
@@ -187,10 +207,14 @@ export default function Home() {
     if (!file) return
     e.target.value = ''
     const res = await window.tidy?.skills.readFile(file.path)
-    if (res?.success && res.text) {
-      setSkillRunnerText(res.text)
+    // res.text가 객체인 경우(오디오 파일 등) 문자열로 변환
+    const text = typeof res?.text === 'string' ? res.text : null
+    if (res?.success && text) {
+      setSkillRunnerText(text)
       setSkillRunnerFile({ name: res.name })
       setTimeout(() => skillRunnerTextRef.current?.focus(), 50)
+    } else if (res?.success && !text) {
+      alert('이 파일 형식은 지원하지 않습니다')
     } else {
       alert(res?.error || '파일을 읽을 수 없습니다')
     }
@@ -198,14 +222,14 @@ export default function Home() {
 
   // 스킬 실행 → 출력 패널 열기
   function runSkill() {
-    const text = skillRunnerText.trim()
+    const text = (typeof skillRunnerText === 'string' ? skillRunnerText : '').trim()
     if (!text) return
     setSkillPanelInput(text)
     setSkillPanelOpen(true)
     setSkillRunnerOpen(false)
   }
 
-  const selectedSkill = SKILLS.find(s => s.id === selectedSkillId)
+  const selectedSkill = SKILLS.find(s => s.id === selectedSkillId) || customSkills.find(s => s.id === selectedSkillId)
 
   return (
     <div className="h-full flex flex-col items-center justify-center bg-[#0f0f0f] text-[#e5e5e5] select-none px-4">
@@ -272,6 +296,61 @@ export default function Home() {
                 </div>
               </div>
 
+              {/* 커스텀 스킬 섹션 */}
+              {(customSkills.length > 0) && (
+                <div className="px-4 pt-3 pb-2 border-b border-[#1a1c28]">
+                  <div className="flex items-center gap-2 mb-2.5">
+                    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="#e879f9" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M2 6l6-4 6 4v8H2V6z"/><path d="M6 14V9h4v5"/>
+                    </svg>
+                    <span className="text-[10px] font-semibold text-[#c026d3] tracking-wide uppercase">내 스킬</span>
+                    <span className="text-[10px] text-[#2a2c3a]">커스텀</span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-1">
+                    {customSkills.map(skill => (
+                      <div key={skill.id} className="relative group">
+                        <button
+                          onClick={() => openSkillRunner(skill.id)}
+                          className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-[#1a1c28] transition-colors text-left"
+                        >
+                          <span className="w-5 h-5 rounded-md flex items-center justify-center text-[11px] flex-shrink-0"
+                            style={{ background: (skill.color || '#c026d3') + '20', color: skill.color || '#c026d3' }}>
+                            {skill.icon || '★'}
+                          </span>
+                          <p className="text-[11px] font-medium text-[#9a9cb8] group-hover:text-[#d0d2e4] transition-colors truncate">{skill.label}</p>
+                        </button>
+                        {/* 수정 / 삭제 버튼 */}
+                        <div className="absolute top-0.5 right-0.5 opacity-0 group-hover:opacity-100 flex gap-0.5 transition-all">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setEditingSkill(skill); setShowCreateSkill(true); setShowSkillPicker(false) }}
+                            title="수정"
+                            className="p-0.5 rounded bg-[#1a1c28] text-[#c026d3] hover:bg-[#252840] hover:text-[#e879f9] transition-colors"
+                          >
+                            <svg width="8" height="8" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M11 2l3 3-9 9H2v-3L11 2z"/>
+                            </svg>
+                          </button>
+                          <button
+                            onClick={async (e) => {
+                              e.stopPropagation()
+                              if (!confirm(`"${skill.label}" 스킬을 삭제할까요?`)) return
+                              await window.tidy?.skills.deleteCustom(skill.id)
+                              await loadCustomSkills()
+                            }}
+                            title="삭제"
+                            className="p-0.5 rounded bg-[#1a1c28] text-[#6b3040] hover:bg-[#2a1020] hover:text-red-400 transition-colors"
+                          >
+                            <svg width="8" height="8" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M2 4h12M5 4V2h6v2M6 7v5M10 7v5M3 4l1 10h8l1-10"/>
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* NotebookLM 스킬 섹션 */}
               <div className="px-4 pt-3 pb-3.5 rounded-b-2xl">
                 <div className="flex items-center gap-2 mb-2.5">
@@ -300,7 +379,31 @@ export default function Home() {
                     </button>
                   ))}
                 </div>
+
+                {/* 스킬 만들기 버튼 */}
+                <button
+                  onClick={() => { setEditingSkill(null); setShowCreateSkill(true); setShowSkillPicker(false) }}
+                  className="mt-3 w-full flex items-center justify-center gap-1.5 py-1.5 rounded-xl border border-dashed border-[#2a2c40] hover:border-[#c026d3]/40 text-[#404060] hover:text-[#c026d3] transition-colors text-[11px]"
+                >
+                  <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                    <path d="M8 3v10M3 8h10"/>
+                  </svg>
+                  스킬 만들기
+                </button>
               </div>
+            </div>
+          )}
+
+          {/* 첨부 파일 태그 */}
+          {attachedFiles.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 px-1">
+              {attachedFiles.map((f, i) => (
+                <span key={i} className="flex items-center gap-1 text-[10px] text-[#9a9cb8] bg-[#1a1c28] border border-[#2a2c40] px-2 py-0.5 rounded-full">
+                  <IconAttach size={9} />
+                  <span className="max-w-[140px] truncate">{f.name}</span>
+                  <button onClick={() => setAttachedFiles(prev => prev.filter((_, j) => j !== i))} className="ml-0.5 hover:text-red-400 transition-colors">×</button>
+                </span>
+              ))}
             </div>
           )}
 
@@ -358,8 +461,8 @@ export default function Home() {
             <button
               type="button"
               onClick={handleSubmit}
-              disabled={!value.trim() || isLoading}
-              className="flex-shrink-0 w-7 h-7 bg-[#d4d4d8] text-white text-xs rounded-lg hover:bg-[#b8b8c0] disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
+              disabled={(!value.trim() && attachedFiles.length === 0) || isLoading}
+              className="flex-shrink-0 w-7 h-7 bg-[#d4d4d8] text-[#111111] text-xs rounded-lg hover:bg-[#b8b8c0] disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
             >
               {isLoading ? '•' : '↵'}
             </button>
@@ -594,9 +697,9 @@ export default function Home() {
               </button>
               <button
                 onClick={runSkill}
-                disabled={!skillRunnerText.trim()}
+                disabled={!(typeof skillRunnerText === 'string' && skillRunnerText.trim())}
                 className="flex-[2] flex items-center justify-center gap-2 text-[12px] font-semibold text-white py-2 rounded-xl transition-colors disabled:opacity-40"
-                style={{ background: skillRunnerText.trim() ? selectedSkill.color : undefined, backgroundColor: !skillRunnerText.trim() ? '#1a1c28' : undefined }}
+                style={{ background: (typeof skillRunnerText === 'string' && skillRunnerText.trim()) ? selectedSkill.color : undefined, backgroundColor: !(typeof skillRunnerText === 'string' && skillRunnerText.trim()) ? '#1a1c28' : undefined }}
               >
                 <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M9 2L7 8H2l4 3-1.5 5L9 13l4.5 3L12 11l4-3H11L9 2z"/>
@@ -617,7 +720,344 @@ export default function Home() {
         skillId={selectedSkillId}
         input={skillPanelInput}
         sourceItemId={null}
+        skillDef={customSkills.find(s => s.id === selectedSkillId) || null}
       />
+
+      {/* ── 스킬 만들기 / 수정 모달 ── */}
+      {showCreateSkill && (
+        <CreateSkillModal
+          skill={editingSkill}
+          onClose={() => { setShowCreateSkill(false); setEditingSkill(null) }}
+          onSaved={async () => {
+            await loadCustomSkills()
+            setShowCreateSkill(false)
+            setEditingSkill(null)
+          }}
+          onDeleted={async () => {
+            await loadCustomSkills()
+            setShowCreateSkill(false)
+            setEditingSkill(null)
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+// ─── 스킬 만들기 / 수정 모달 ────────────────────────────────────
+const SKILL_COLORS = ['#6366f1','#0ea5e9','#8b5cf6','#3b82f6','#f59e0b','#10b981','#84cc16','#f97316','#ef4444','#c026d3','#0891b2','#65a30d']
+const SKILL_ICONS  = ['★','◈','▤','✦','⇄','◉','▷','◻','◫','⊞','⊛','⧉','◆','▲','●','♦','⬟','⬡','✿','❋']
+
+function CreateSkillModal({ skill, onClose, onSaved, onDeleted }) {
+  const isEdit = !!skill
+  const [tab, setTab] = useState('nl')            // 'nl' | 'manual'
+  const [nlDesc, setNlDesc] = useState('')        // 자연어 설명
+  const [generating, setGenerating] = useState(false)
+  const [genError, setGenError] = useState('')
+
+  // 스킬 필드
+  const [label, setLabel]   = useState(skill?.label || '')
+  const [icon, setIcon]     = useState(skill?.icon  || '★')
+  const [color, setColor]   = useState(skill?.color || '#6366f1')
+  const [desc, setDesc]     = useState(skill?.desc  || '')
+  const [detail, setDetail] = useState(skill?.detail || '')
+  const [systemPrompt, setSystemPrompt] = useState(skill?.systemPrompt || '')
+  const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+
+  // AI로 스킬 생성
+  async function handleGenerate() {
+    if (!nlDesc.trim()) return
+    setGenerating(true)
+    setGenError('')
+    try {
+      const res = await window.tidy?.skills.generate({ description: nlDesc.trim() })
+      if (res?.skill) {
+        const s = res.skill
+        setLabel(s.label || '')
+        setIcon(s.icon || '★')
+        setColor(s.color || '#6366f1')
+        setDesc(s.desc || '')
+        setDetail(s.detail || '')
+        setSystemPrompt(s.systemPrompt || '')
+        setTab('manual')  // 결과 확인 탭으로 전환
+      } else {
+        setGenError(res?.error || '생성 실패. 다시 시도해주세요.')
+      }
+    } catch (e) {
+      setGenError(e.message)
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  async function handleSave() {
+    if (!label.trim() || !systemPrompt.trim()) return
+    setSaving(true)
+    try {
+      const skillObj = {
+        id: skill?.id || null,
+        label: label.trim(),
+        icon,
+        color,
+        desc: desc.trim(),
+        detail: detail.trim(),
+        systemPrompt: systemPrompt.trim(),
+        type: 'custom',
+        source: 'user',
+      }
+      await window.tidy?.skills.saveCustom(skillObj)
+      onSaved()
+    } catch (e) {
+      alert('저장 실패: ' + e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleDelete() {
+    if (!skill?.id) return
+    setDeleting(true)
+    try {
+      await window.tidy?.skills.deleteCustom(skill.id)
+      onDeleted()
+    } catch (e) {
+      alert('삭제 실패: ' + e.message)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="bg-[#0f1018] border border-[#1c1e2a] rounded-2xl w-full max-w-lg shadow-2xl fade-in flex flex-col max-h-[90vh]"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* 헤더 */}
+        <div className="flex items-center gap-3 px-5 py-4 border-b border-[#181a26] flex-shrink-0">
+          <span className="w-8 h-8 rounded-xl flex items-center justify-center text-sm flex-shrink-0"
+            style={{ background: color + '20', color }}>
+            {icon}
+          </span>
+          <div className="flex-1 min-w-0">
+            <p className="text-[13px] font-semibold text-[#e0e0f0]">{isEdit ? '스킬 수정' : '새 스킬 만들기'}</p>
+            <p className="text-[11px] text-[#505272]">AI가 스킬을 자동으로 설계합니다</p>
+          </div>
+          <button onClick={onClose} className="text-[#505272] hover:text-[#9a9cb8] p-1 rounded transition-colors">
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <path d="M2 2l12 12M14 2L2 14"/>
+            </svg>
+          </button>
+        </div>
+
+        {/* 탭 */}
+        <div className="flex border-b border-[#181a26] flex-shrink-0">
+          <button
+            onClick={() => setTab('nl')}
+            className={`flex-1 py-2.5 text-[11px] font-medium transition-colors ${tab === 'nl' ? 'text-[#c026d3] border-b-2 border-[#c026d3]' : 'text-[#505272] hover:text-[#9a9cb8]'}`}
+          >
+            ✦ AI로 생성
+          </button>
+          <button
+            onClick={() => setTab('manual')}
+            className={`flex-1 py-2.5 text-[11px] font-medium transition-colors ${tab === 'manual' ? 'text-[#c026d3] border-b-2 border-[#c026d3]' : 'text-[#505272] hover:text-[#9a9cb8]'}`}
+          >
+            ✎ 직접 입력
+          </button>
+        </div>
+
+        {/* 스크롤 컨텐츠 */}
+        <div className="overflow-y-auto flex-1 px-5 py-4 space-y-4">
+
+          {/* AI 생성 탭 */}
+          {tab === 'nl' && (
+            <div className="space-y-3">
+              <div>
+                <label className="text-[10px] font-semibold text-[#505272] uppercase tracking-widest mb-1.5 block">
+                  어떤 스킬이 필요한가요?
+                </label>
+                <textarea
+                  value={nlDesc}
+                  onChange={e => setNlDesc(e.target.value)}
+                  placeholder={'예시:\n"이메일을 받으면 핵심 요청 사항과 기한을 추출해서 태스크 형태로 정리해줘"\n"계약서 문서를 분석해서 리스크 항목과 주요 조건을 요약해줘"\n"고객 피드백을 긍정/부정/개선요청으로 분류해줘"'}
+                  rows={5}
+                  className="w-full bg-[#09090c] border border-[#1a1c28] rounded-xl px-4 py-3 text-[12px] text-[#c8c8d8] placeholder-[#2a2c48] focus:outline-none focus:border-[#c026d3]/40 resize-none leading-relaxed transition-colors"
+                  onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleGenerate() }}
+                />
+              </div>
+              {genError && <p className="text-[11px] text-red-400">{genError}</p>}
+              <button
+                onClick={handleGenerate}
+                disabled={!nlDesc.trim() || generating}
+                className="w-full py-2.5 rounded-xl text-[12px] font-semibold text-white transition-colors disabled:opacity-40"
+                style={{ background: (!nlDesc.trim() || generating) ? '#1a1c28' : '#c026d3' }}
+              >
+                {generating ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <svg className="animate-spin" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 2a6 6 0 1 0 6 6"/></svg>
+                    AI가 스킬을 설계 중...
+                  </span>
+                ) : '✦ 스킬 자동 생성 (⌘+Enter)'}
+              </button>
+              {!isEdit && (
+                <p className="text-[10px] text-[#303050] text-center">
+                  생성 후 "직접 입력" 탭에서 세부 내용을 확인하고 수정할 수 있어요
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* 직접 입력 탭 */}
+          {tab === 'manual' && (
+            <div className="space-y-3.5">
+              {/* 아이콘 + 색상 */}
+              <div className="flex gap-3">
+                <div className="flex-shrink-0">
+                  <label className="text-[10px] font-semibold text-[#505272] uppercase tracking-widest mb-1.5 block">아이콘</label>
+                  <div className="flex flex-wrap gap-1 w-[136px]">
+                    {SKILL_ICONS.map(ic => (
+                      <button
+                        key={ic}
+                        onClick={() => setIcon(ic)}
+                        className={`w-7 h-7 rounded-lg text-[13px] flex items-center justify-center transition-colors ${icon === ic ? 'ring-2 ring-[#c026d3]' : 'hover:bg-[#1a1c28]'}`}
+                        style={{ color: icon === ic ? color : '#505272' }}
+                      >{ic}</button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex-1">
+                  <label className="text-[10px] font-semibold text-[#505272] uppercase tracking-widest mb-1.5 block">색상</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {SKILL_COLORS.map(c => (
+                      <button
+                        key={c}
+                        onClick={() => setColor(c)}
+                        className={`w-6 h-6 rounded-full transition-transform ${color === c ? 'scale-125 ring-2 ring-white/30' : 'hover:scale-110'}`}
+                        style={{ background: c }}
+                      />
+                    ))}
+                  </div>
+                  {/* 미리보기 */}
+                  <div className="mt-3 flex items-center gap-2 p-2.5 rounded-xl bg-[#0a0b12] border border-[#1c1e2c]">
+                    <span className="w-7 h-7 rounded-lg flex items-center justify-center text-[13px] flex-shrink-0"
+                      style={{ background: color + '20', color }}>
+                      {icon}
+                    </span>
+                    <div>
+                      <p className="text-[11px] font-medium text-[#9a9cb8]">{label || '스킬 이름'}</p>
+                      <p className="text-[9px] text-[#404060]">{desc || '설명'}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 이름 */}
+              <div>
+                <label className="text-[10px] font-semibold text-[#505272] uppercase tracking-widest mb-1.5 block">스킬 이름 *</label>
+                <input
+                  value={label}
+                  onChange={e => setLabel(e.target.value)}
+                  placeholder="예: 이메일 태스크 추출"
+                  className="w-full bg-[#09090c] border border-[#1a1c28] rounded-xl px-4 py-2 text-[12px] text-[#c8c8d8] placeholder-[#2a2c48] focus:outline-none focus:border-[#c026d3]/40 transition-colors"
+                />
+              </div>
+
+              {/* 설명 */}
+              <div>
+                <label className="text-[10px] font-semibold text-[#505272] uppercase tracking-widest mb-1.5 block">짧은 설명</label>
+                <input
+                  value={desc}
+                  onChange={e => setDesc(e.target.value)}
+                  placeholder="예: 이메일에서 요청 태스크와 기한 추출"
+                  className="w-full bg-[#09090c] border border-[#1a1c28] rounded-xl px-4 py-2 text-[12px] text-[#c8c8d8] placeholder-[#2a2c48] focus:outline-none focus:border-[#c026d3]/40 transition-colors"
+                />
+              </div>
+
+              {/* 상세 설명 */}
+              <div>
+                <label className="text-[10px] font-semibold text-[#505272] uppercase tracking-widest mb-1.5 block">상세 설명 (선택)</label>
+                <textarea
+                  value={detail}
+                  onChange={e => setDetail(e.target.value)}
+                  placeholder="스킬 소개 화면에 표시될 설명..."
+                  rows={2}
+                  className="w-full bg-[#09090c] border border-[#1a1c28] rounded-xl px-4 py-2 text-[12px] text-[#c8c8d8] placeholder-[#2a2c48] focus:outline-none focus:border-[#c026d3]/40 resize-none transition-colors"
+                />
+              </div>
+
+              {/* 시스템 프롬프트 */}
+              <div>
+                <label className="text-[10px] font-semibold text-[#505272] uppercase tracking-widest mb-1.5 block">
+                  AI 지시문 (System Prompt) *
+                </label>
+                <textarea
+                  value={systemPrompt}
+                  onChange={e => setSystemPrompt(e.target.value)}
+                  placeholder={'AI에게 전달할 지시문을 입력하세요.\n예:\n당신은 이메일 분석 전문가입니다. 입력된 이메일에서:\n1. 요청 사항을 태스크 형태로 추출\n2. 기한이 있다면 날짜 형식으로 명시\n3. 우선순위(높음/보통/낮음) 분류'}
+                  rows={6}
+                  className="w-full bg-[#09090c] border border-[#1a1c28] rounded-xl px-4 py-3 text-[12px] text-[#c8c8d8] placeholder-[#2a2c48] focus:outline-none focus:border-[#c026d3]/40 resize-none leading-relaxed transition-colors font-mono"
+                />
+                <p className="mt-1 text-[10px] text-[#303050]">이 내용이 Claude에게 전달되어 스킬의 동작 방식을 결정합니다</p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 하단 버튼 */}
+        <div className="flex gap-2 px-5 pb-5 pt-3 border-t border-[#181a26] flex-shrink-0">
+          {isEdit && !confirmDelete && (
+            <button
+              onClick={() => setConfirmDelete(true)}
+              className="px-3 py-2 text-[11px] text-red-400 hover:text-red-300 hover:bg-red-900/20 rounded-xl transition-colors"
+            >
+              삭제
+            </button>
+          )}
+          {confirmDelete && (
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-red-400">정말 삭제할까요?</span>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="px-3 py-1.5 text-[11px] bg-red-600 hover:bg-red-500 text-white rounded-lg transition-colors disabled:opacity-50"
+              >{deleting ? '삭제 중...' : '삭제'}</button>
+              <button onClick={() => setConfirmDelete(false)} className="px-3 py-1.5 text-[11px] text-[#505272] hover:text-[#9a9cb8] rounded-lg transition-colors">취소</button>
+            </div>
+          )}
+          {!confirmDelete && (
+            <>
+              <button
+                onClick={onClose}
+                className="flex-1 py-2 text-[12px] text-[#6b6e8c] hover:text-[#9a9cb8] border border-[#1a1c28] hover:border-[#252840] rounded-xl transition-colors"
+              >취소</button>
+              {tab === 'manual' && (
+                <button
+                  onClick={handleSave}
+                  disabled={!label.trim() || !systemPrompt.trim() || saving}
+                  className="flex-[2] py-2 text-[12px] font-semibold text-white rounded-xl transition-colors disabled:opacity-40"
+                  style={{ background: (!label.trim() || !systemPrompt.trim() || saving) ? '#1a1c28' : '#c026d3' }}
+                >
+                  {saving ? '저장 중...' : (isEdit ? '수정 저장' : '스킬 저장')}
+                </button>
+              )}
+              {tab === 'nl' && (
+                <button
+                  onClick={() => setTab('manual')}
+                  disabled={!label}
+                  className="flex-[2] py-2 text-[12px] font-medium text-[#c026d3] border border-[#c026d3]/30 hover:border-[#c026d3]/60 rounded-xl transition-colors disabled:opacity-30"
+                >
+                  {label ? '결과 확인 →' : '생성 후 확인 가능'}
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

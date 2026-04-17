@@ -9,6 +9,7 @@ const TABS = [
   { id: 'notifications', label: '알림' },
   { id: 'sources', label: '소스' },
   { id: 'gdrive', label: 'Drive' },
+  { id: 'marketplace', label: '마켓' },
   { id: 'backup', label: '백업' },
 ]
 
@@ -71,6 +72,13 @@ export default function Settings({ embedded = false }) {
   const [newSource, setNewSource] = useState({ id: '', label: '' })
   const [showAddSource, setShowAddSource] = useState(false)
 
+  // 마켓플레이스
+  const [marketUrl, setMarketUrl]           = useState('')
+  const [marketAuthorName, setMarketAuthorName] = useState('')
+  const [marketSaving, setMarketSaving]     = useState(false)
+  const [marketTestStatus, setMarketTestStatus] = useState(null) // null|'ok'|'fail'
+  const [marketTestMsg, setMarketTestMsg]   = useState('')
+
   // 개발용 테스트
   const [testText, setTestText] = useState('')
   const [testSource, setTestSource] = useState('test')
@@ -123,6 +131,12 @@ export default function Settings({ embedded = false }) {
       try {
         const cats = await window.tidy?.categories.get()
         if (Array.isArray(cats)) setCategories(cats)
+      } catch {}
+      try {
+        const url    = await window.tidy?.marketplace.getUrl?.()
+        const author = await window.tidy?.marketplace.getAuthor?.()
+        if (url)           setMarketUrl(url)
+        if (author?.authorName) setMarketAuthorName(author.authorName)
       } catch {}
     }
     loadSettings()
@@ -319,7 +333,7 @@ export default function Settings({ embedded = false }) {
                   <button
                     type="submit"
                     disabled={!anthropicKey.trim() || saving}
-                    className="px-4 py-2 bg-[#d4d4d8] text-white text-sm rounded-lg hover:bg-[#b8b8c0] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    className="px-4 py-2 bg-[#d4d4d8] text-[#111111] text-sm rounded-lg hover:bg-[#b8b8c0] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                   >
                     {saving ? '저장 중...' : '저장'}
                   </button>
@@ -1167,6 +1181,91 @@ export default function Settings({ embedded = false }) {
                     + 카테고리 추가
                   </button>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* ── 마켓플레이스 탭 ──────────────────────────── */}
+          {tab === 'marketplace' && (
+            <div className="space-y-6">
+              <div>
+                <h2 className="text-sm font-semibold text-[#e5e5e5] mb-1">스킬 마켓플레이스</h2>
+                <p className="text-xs text-[#737373] mb-5">
+                  커스텀 스킬을 공유하고 탐색하는 마켓 서버 설정입니다.
+                </p>
+
+                {/* 서버 URL */}
+                <div className="bg-[#111] border border-[#1e1e1e] rounded-xl p-4 mb-3">
+                  <h3 className="text-xs font-semibold text-[#c8c8d0] mb-1">서버 주소</h3>
+                  <p className="text-xs text-[#505050] mb-3">
+                    마켓플레이스 서버 URL입니다. 로컬 서버 또는 공유 서버 주소를 입력하세요.
+                  </p>
+                  <div className="flex gap-2">
+                    <input
+                      value={marketUrl}
+                      onChange={e => { setMarketUrl(e.target.value); setMarketTestStatus(null) }}
+                      placeholder="http://localhost:3333"
+                      className={inputCls}
+                    />
+                    <button
+                      onClick={async () => {
+                        setMarketTestStatus(null); setMarketTestMsg('')
+                        try {
+                          const res = await fetch(`${marketUrl.replace(/\/$/, '')}/health`)
+                          if (res.ok) {
+                            const data = await res.json()
+                            setMarketTestStatus('ok')
+                            setMarketTestMsg(`연결 성공 — 스킬 ${data.skills}개`)
+                          } else {
+                            setMarketTestStatus('fail'); setMarketTestMsg(`서버 오류: ${res.status}`)
+                          }
+                        } catch (e) {
+                          setMarketTestStatus('fail'); setMarketTestMsg(e.message)
+                        }
+                      }}
+                      className="px-3 py-2 bg-[#141414] border border-[#2a2a2a] text-[#e5e5e5] text-sm rounded-lg hover:border-[#c8c8d0] whitespace-nowrap transition-colors"
+                    >연결 테스트</button>
+                  </div>
+                  {marketTestStatus === 'ok' && <p className="text-xs text-green-400 mt-2">✓ {marketTestMsg}</p>}
+                  {marketTestStatus === 'fail' && <p className="text-xs text-red-400 mt-2">✗ {marketTestMsg}</p>}
+                </div>
+
+                {/* 작성자 이름 */}
+                <div className="bg-[#111] border border-[#1e1e1e] rounded-xl p-4 mb-3">
+                  <h3 className="text-xs font-semibold text-[#c8c8d0] mb-1">작성자 이름</h3>
+                  <p className="text-xs text-[#505050] mb-3">스킬을 공유할 때 표시되는 이름입니다.</p>
+                  <input
+                    value={marketAuthorName}
+                    onChange={e => setMarketAuthorName(e.target.value)}
+                    placeholder="닉네임 또는 이름"
+                    className={inputCls}
+                  />
+                </div>
+
+                {/* 저장 버튼 */}
+                <button
+                  onClick={async () => {
+                    setMarketSaving(true)
+                    try {
+                      await window.tidy?.marketplace.setUrl?.(marketUrl.trim() || 'http://localhost:3333')
+                      // authorName은 publish 시점에 저장되므로 여기선 로컬 상태만 유지
+                      showFeedback('success', '마켓플레이스 설정이 저장되었습니다')
+                    } catch (e) {
+                      showFeedback('error', e.message)
+                    } finally { setMarketSaving(false) }
+                  }}
+                  disabled={marketSaving}
+                  className={btnOutlineCls}
+                >{marketSaving ? '저장 중...' : '저장'}</button>
+
+                {/* 로컬 서버 안내 */}
+                <div className="mt-4 p-4 rounded-xl bg-[#0d0e14] border border-[#1a1c28]">
+                  <p className="text-[11px] font-semibold text-[#6b6e8c] mb-2">로컬 마켓 서버 실행 방법</p>
+                  <pre className="text-[11px] text-[#c026d3] font-mono leading-relaxed bg-[#09090c] border border-[#1a1c28] rounded-lg px-3 py-2.5">{`cd tidy/server
+npm install
+npm start`}</pre>
+                  <p className="text-[10px] text-[#404060] mt-2">기본 포트: 3333 · SQLite 로컬 DB 사용</p>
+                </div>
               </div>
             </div>
           )}

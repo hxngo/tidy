@@ -56,7 +56,9 @@ function checkUrgentReminders() {
     if (now - s.lastAt < interval) continue
 
     // 리마인더 전송
-    const who = (JSON.parse(item.people || '[]')[0]) || item.source || '긴급'
+    let peopleArr = []
+    try { peopleArr = JSON.parse(item.people || '[]') } catch (_) {}
+    const who = (Array.isArray(peopleArr) ? peopleArr[0] : null) || item.source || '긴급'
     const notif = new Notification({
       title: `[긴급 리마인더] ${who}`,
       body: item.summary?.slice(0, 120) || '',

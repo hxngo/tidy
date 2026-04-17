@@ -368,9 +368,9 @@ const SKILL_PROMPTS = {
 붙임: (첨부 목록, 해당 시)  끝.`,
 }
 
-async function runSkill(skillId, input, { messages = [] } = {}) {
+async function runSkill(skillId, input, { messages = [], customPrompt = null } = {}) {
   const client = getClient()
-  const prompt = SKILL_PROMPTS[skillId]
+  const prompt = customPrompt || SKILL_PROMPTS[skillId]
   if (!prompt) throw new Error(`알 수 없는 스킬: ${skillId}`)
 
   let conversationMessages

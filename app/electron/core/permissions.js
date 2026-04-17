@@ -11,31 +11,36 @@ const os = require('os')
 const fs = require('fs')
 const { dialog, shell } = require('electron')
 
-// 접근 여부를 판별할 보호된 파일 (Full Disk Access 없이는 읽을 수 없음)
-const PROTECTED_PATH = path.join(
-  os.homedir(),
-  'Library/Group Containers/group.com.apple.usernoted/db2/db'
-)
+// FDA 확인용 보호 경로 목록 (하나라도 접근 가능하면 FDA 있음)
+const PROTECTED_PATHS = [
+  path.join(os.homedir(), 'Library/Messages/chat.db'),
+  path.join(os.homedir(), 'Library/Mail'),
+  path.join(os.homedir(), 'Library/Group Containers/group.com.apple.usernoted/db2/db'),
+]
 
 /**
  * 전체 디스크 접근 권한 여부를 확인한다.
- * @returns {boolean} true = 접근 가능 (또는 macOS 외 플랫폼), false = 권한 없음
+ * @returns {boolean} true = 접근 가능, false = 권한 없음
  */
 function checkFullDiskAccess() {
   if (process.platform !== 'darwin') return true
 
-  try {
-    const fd = fs.openSync(PROTECTED_PATH, 'r')
-    const buf = Buffer.alloc(4)
-    fs.readSync(fd, buf, 0, 4, 0)
-    fs.closeSync(fd)
-    return true
-  } catch (err) {
-    // ENOENT: 파일이 없지만 폴더 자체에 접근 가능 → FDA 있음
-    if (err.code === 'ENOENT') return true
-    // EACCES / EPERM: 파일이 있지만 읽지 못함 → FDA 없음
-    return false
+  for (const p of PROTECTED_PATHS) {
+    try {
+      fs.readdirSync(path.dirname(p))
+      const fd = fs.openSync(p, 'r')
+      fs.closeSync(fd)
+      return true // 파일 읽기 성공 → FDA 있음
+    } catch (err) {
+      if (err.code === 'EACCES' || err.code === 'EPERM') {
+        return false // 접근 거부 → FDA 없음
+      }
+      // ENOENT: 이 파일이 없을 뿐, 다음 경로 시도
+    }
   }
+
+  // 모든 경로가 ENOENT → 파일 존재 여부 불명확, false로 안전하게 처리
+  return false
 }
 
 /**

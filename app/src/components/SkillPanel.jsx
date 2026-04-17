@@ -67,8 +67,15 @@ export function skillById(id) {
   return SKILLS.find(s => s.id === id) || { id, label: id, icon: '·', color: '#6b7280', type: 'ai' }
 }
 
+// 커스텀 스킬 캐시 (Home.jsx에서 로드한 커스텀 스킬)
+let _customSkillsCache = []
+export function setCustomSkillsCache(skills) { _customSkillsCache = skills || [] }
+export function skillByIdWithCustom(id) {
+  return SKILLS.find(s => s.id === id) || _customSkillsCache.find(s => s.id === id) || { id, label: id, icon: '·', color: '#6b7280', type: 'ai' }
+}
+
 // ─── SkillPanel ───────────────────────────────────────────────
-export default function SkillPanel({ open, onClose, skillId, input, sourceItemId }) {
+export default function SkillPanel({ open, onClose, skillId, input, sourceItemId, skillDef }) {
   const [state, setState] = useState('idle') // idle | running | done | done-file | error | setup-required
   const [output, setOutput] = useState('')
   const [copied, setCopied] = useState(false)
@@ -90,7 +97,7 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
   const progressUnsubRef = useRef(null)
   const elapsedTimerRef = useRef(null)
 
-  const skill = skillById(skillId)
+  const skill = skillDef || skillByIdWithCustom(skillId)
   const isNlm = skill.type === 'nlm'
   const isTranslate = skillId === 'translate'
   const isSummary = skillId === 'summary'
@@ -107,10 +114,12 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
     setChatInput('')
     setChatLoading(true)
     try {
+      const customPrompt = skill.type === 'custom' ? (skill.systemPrompt || null) : null
       const res = await window.tidy?.skills.run({
         skillId,
         input: trimmed,
         messages: currentApiMessages || [],
+        customPrompt,
       })
       if (res?.success) {
         setChatMessages(prev => [...prev, { role: 'ai', text: res.output }])
@@ -193,8 +202,9 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
           })
       })
     } else {
-      // AI 스킬 (로컬)
-      window.tidy?.skills.run({ skillId, input, sourceItemId })
+      // AI 스킬 (로컬) — 커스텀 스킬이면 systemPrompt 포함
+      const customPrompt = skill.type === 'custom' ? (skill.systemPrompt || null) : null
+      window.tidy?.skills.run({ skillId, input, sourceItemId, customPrompt })
         .then(res => {
           if (res?.success) {
             setOutput(res.output)

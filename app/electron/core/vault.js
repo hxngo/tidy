@@ -1001,6 +1001,82 @@ function buildIndex() {
   }
 }
 
+// ─── User Profile (Cold Start / user_question_generator) ────────
+// Layer 1: 기본 신원 / Layer 2: 업무 맥락 / Layer 3: 관계망
+// Layer 4: 커뮤니케이션 스타일 / Layer 5: 도메인 전문성
+function getUserProfilePath() {
+  return path.join(getVaultPath(), 'profile.json')
+}
+
+function getUserProfile() {
+  const filePath = getUserProfilePath()
+  if (!fs.existsSync(filePath)) return null
+  try { return JSON.parse(fs.readFileSync(filePath, 'utf-8')) } catch { return null }
+}
+
+function saveUserProfile(profile) {
+  ensureDir(getVaultPath())
+  const existing = getUserProfile() || {}
+  const updated = {
+    ...existing,
+    ...profile,
+    updated_at: new Date().toISOString(),
+  }
+  if (!updated.created_at) updated.created_at = updated.updated_at
+  fs.writeFileSync(getUserProfilePath(), JSON.stringify(updated, null, 2), 'utf-8')
+  console.log('[Vault] userProfile 저장')
+  return updated
+}
+
+// ─── Custom Skills ───────────────────────────────────────────────
+function getCustomSkillsDir() {
+  return path.join(getVaultPath(), 'Skills', 'Custom')
+}
+
+function getCustomSkills() {
+  const dir = getCustomSkillsDir()
+  if (!fs.existsSync(dir)) return []
+  return fs.readdirSync(dir)
+    .filter(f => f.endsWith('.json'))
+    .map(f => {
+      try { return JSON.parse(fs.readFileSync(path.join(dir, f), 'utf-8')) } catch { return null }
+    })
+    .filter(Boolean)
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+}
+
+function saveCustomSkill(skill) {
+  const dir = getCustomSkillsDir()
+  ensureDir(dir)
+  const now = new Date().toISOString()
+  const data = {
+    id: skill.id || require('crypto').randomUUID(),
+    label: skill.label,
+    icon: skill.icon || '✦',
+    color: skill.color || '#6366f1',
+    desc: skill.desc || '',
+    detail: skill.detail || '',
+    systemPrompt: skill.systemPrompt || '',
+    examples: skill.examples || [],
+    tip: skill.tip || '',
+    type: 'custom',
+    source: skill.source || 'user',  // 'user' | 'marketplace'
+    created_at: skill.created_at || now,
+    updated_at: now,
+  }
+  fs.writeFileSync(path.join(dir, `${data.id}.json`), JSON.stringify(data, null, 2), 'utf-8')
+  console.log('[Vault] 커스텀 스킬 저장:', data.label)
+  return data
+}
+
+function deleteCustomSkill(id) {
+  const filePath = path.join(getCustomSkillsDir(), `${id}.json`)
+  if (!fs.existsSync(filePath)) return false
+  fs.unlinkSync(filePath)
+  console.log('[Vault] 커스텀 스킬 삭제:', id)
+  return true
+}
+
 // ─── 스킬 출력물 ────────────────────────────────────────────────
 function saveSkillOutput({ skillId, skillLabel, input, output, sourceItemId }) {
   const id = randomUUID()
@@ -1085,4 +1161,9 @@ module.exports = {
   saveSkillOutput,
   getSkillOutputs,
   deleteSkillOutput,
+  getUserProfile,
+  saveUserProfile,
+  getCustomSkills,
+  saveCustomSkill,
+  deleteCustomSkill,
 }

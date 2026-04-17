@@ -70,6 +70,7 @@ contextBridge.exposeInMainWorld('tidy', {
     get: () => ipcRenderer.invoke('onboarding:get'),
     complete: (params) => ipcRenderer.invoke('onboarding:complete', params),
     import: (params) => ipcRenderer.invoke('onboarding:import', params),
+    reset: () => ipcRenderer.invoke('onboarding:reset'),
   },
 
   // Obsidian 연동
@@ -134,15 +135,21 @@ contextBridge.exposeInMainWorld('tidy', {
     delete: (name) => ipcRenderer.invoke('categories:delete', { name }),
   },
 
-  // 음성 인식 (STT)
-  stt: {
-    transcribe: (wavBuffer) => ipcRenderer.invoke('stt:transcribe', { wavBuffer }),
-    onModelProgress: (cb) => makeListener('stt:model-progress', cb),
-  },
-
   // 전체 검색
   search: {
     global: (q) => ipcRenderer.invoke('search:global', { q }),
+  },
+
+  // 스킬 마켓플레이스
+  marketplace: {
+    list:       (params) => ipcRenderer.invoke('marketplace:list', params),
+    publish:    (params) => ipcRenderer.invoke('marketplace:publish', params),
+    install:    (id)     => ipcRenderer.invoke('marketplace:install', { id }),
+    like:       (id)     => ipcRenderer.invoke('marketplace:like', { id }),
+    unpublish:  (mid)    => ipcRenderer.invoke('marketplace:unpublish', { marketId: mid }),
+    getAuthor:  ()       => ipcRenderer.invoke('marketplace:get-author'),
+    getUrl:     ()       => ipcRenderer.invoke('marketplace:get-url'),
+    setUrl:     (url)    => ipcRenderer.invoke('marketplace:set-url', { url }),
   },
 
   // 개발용 테스트
@@ -163,6 +170,19 @@ contextBridge.exposeInMainWorld('tidy', {
     openInApp: (params) => ipcRenderer.invoke('skill:open-in-app', params),
     openHwpFile: (filePath) => ipcRenderer.invoke('skill:open-hwp-file', { filePath }),
     readFile: (filePath) => ipcRenderer.invoke('skill:read-file', { filePath }),
+    // 커스텀 스킬
+    listCustom: () => ipcRenderer.invoke('skill:list-custom'),
+    saveCustom: (skill) => ipcRenderer.invoke('skill:save-custom', skill),
+    deleteCustom: (id) => ipcRenderer.invoke('skill:delete-custom', { id }),
+    generate: (params) => ipcRenderer.invoke('skill:generate', params),
+  },
+
+  // 사용자 프로필 (Cold Start / user_question_generator)
+  profile: {
+    get: () => ipcRenderer.invoke('profile:get'),
+    save: (fields) => ipcRenderer.invoke('profile:save', fields),
+    nextQuestion: (params) => ipcRenderer.invoke('profile:next-question', params),
+    analyze: (params) => ipcRenderer.invoke('profile:analyze', params),
   },
 
   // NotebookLM 스킬

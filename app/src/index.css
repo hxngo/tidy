@@ -42,64 +42,184 @@
 
 /* ── 라이트 모드 Tailwind 클래스 재정의 ──────────── */
 
-/* 배경 */
+/* ▸ 배경 — 극어두운 (#00–#10) → 거의 흰색 */
+[data-theme="light"] .bg-\[#08090e\]  { background-color: #f5f5f8 !important; }
 [data-theme="light"] .bg-\[#09090c\]  { background-color: #f7f7fa !important; }
-[data-theme="light"] .bg-\[#0f1018\]  { background-color: #ffffff !important; }
+[data-theme="light"] .bg-\[#0a0b12\]  { background-color: #f5f5f8 !important; }
 [data-theme="light"] .bg-\[#0b0d14\]  { background-color: #f5f5f8 !important; }
-[data-theme="light"] .bg-\[#0f0f0f\]  { background-color: #f5f5f8 !important; }
-[data-theme="light"] .bg-\[#0d0e15\]  { background-color: #f0f0f4 !important; }
 [data-theme="light"] .bg-\[#0d0d0d\]  { background-color: #ffffff !important; }
-[data-theme="light"] .bg-\[#1a1a1a\]  { background-color: #f0f0f4 !important; }
-[data-theme="light"] .bg-\[#14151e\]  { background-color: #ededf1 !important; }
-[data-theme="light"] .bg-\[#1a1c28\]  { background-color: #e8e8ed !important; }
-[data-theme="light"] .bg-\[#1c1c22\]  { background-color: #ededf1 !important; }
-[data-theme="light"] .bg-\[#131420\]  { background-color: #f0f0f3 !important; }
+[data-theme="light"] .bg-\[#0d0e15\]  { background-color: #f3f3f6 !important; }
+[data-theme="light"] .bg-\[#0d0e16\]  { background-color: #f3f3f6 !important; }
+[data-theme="light"] .bg-\[#0e0f16\]  { background-color: #f3f3f6 !important; }
+[data-theme="light"] .bg-\[#0f0f0f\]  { background-color: #f5f5f8 !important; }
+[data-theme="light"] .bg-\[#0f1018\]  { background-color: #ffffff !important; }
 
-/* 텍스트 — 밝은 색 → 어두운 색으로 */
+/* ▸ 배경 — 어두운 (#10–#20) → 연한 회색 */
+[data-theme="light"] .bg-\[#13141c\]  { background-color: #eeeeef !important; }
+[data-theme="light"] .bg-\[#13141e\]  { background-color: #eeeef1 !important; }
+[data-theme="light"] .bg-\[#131420\]  { background-color: #f0f0f3 !important; }
+[data-theme="light"] .bg-\[#141414\]  { background-color: #eeeeef !important; }
+[data-theme="light"] .bg-\[#141520\]  { background-color: #eeeef2 !important; }
+[data-theme="light"] .bg-\[#14151e\]  { background-color: #ededf1 !important; }
+[data-theme="light"] .bg-\[#1a1a1a\]  { background-color: #f0f0f4 !important; }
+[data-theme="light"] .bg-\[#1a1a2e\]  { background-color: #eeeef4 !important; }
+[data-theme="light"] .bg-\[#1a1c28\]  { background-color: #e8e8ed !important; }
+[data-theme="light"] .bg-\[#1a1c2a\]  { background-color: #e8e8ed !important; }
+[data-theme="light"] .bg-\[#1a1c2e\]  { background-color: #e8e8ed !important; }
+[data-theme="light"] .bg-\[#1c1c22\]  { background-color: #ebebef !important; }
+[data-theme="light"] .bg-\[#1c1e2a\]  { background-color: #e8e8ed !important; }
+[data-theme="light"] .bg-\[#1e1e26\]  { background-color: #e5e5ea !important; }
+[data-theme="light"] .bg-\[#1e1e1e\]  { background-color: #ececec !important; }
+[data-theme="light"] .bg-\[#1e2030\]  { background-color: #e5e5eb !important; }
+
+/* ▸ 배경 — 중간 (#20–#50) → 밝은 회색 */
+[data-theme="light"] .bg-\[#3a3a3e\]  { background-color: #d8d8dc !important; }
+[data-theme="light"] .bg-\[#4a4c6a\]  { background-color: #6366f1 !important; }
+
+/* ▸ 텍스트 — 밝은 색(다크모드용) → 어두운 색으로 */
 [data-theme="light"] .text-\[#e2e2ea\]  { color: #1c1c1e !important; }
 [data-theme="light"] .text-\[#e5e5e5\]  { color: #1c1c1e !important; }
 [data-theme="light"] .text-\[#e8e8f2\]  { color: #1c1c1e !important; }
+[data-theme="light"] .text-\[#e8e8f8\]  { color: #1c1c1e !important; }
+[data-theme="light"] .text-\[#e8eaf6\]  { color: #1c1c1e !important; }
+[data-theme="light"] .text-\[#e0e0f0\]  { color: #2c2c2e !important; }
 [data-theme="light"] .text-\[#d8d8e8\]  { color: #1c1c1e !important; }
+[data-theme="light"] .text-\[#d4d4d8\]  { color: #3c3c43 !important; }
 [data-theme="light"] .text-\[#d0d0e4\]  { color: #2c2c2e !important; }
+[data-theme="light"] .text-\[#d0d2e4\]  { color: #2c2c2e !important; }
 [data-theme="light"] .text-\[#c8c8d0\]  { color: #3c3c43 !important; }
+[data-theme="light"] .text-\[#c8c8d8\]  { color: #2c2c2e !important; }
+[data-theme="light"] .text-\[#c8c8d8\]  { color: #2c2c2e !important; }
+[data-theme="light"] .text-\[#c8cae8\]  { color: #3c3c43 !important; }
+[data-theme="light"] .text-\[#c0c0d8\]  { color: #3c3c43 !important; }
+[data-theme="light"] .text-\[#c0c2d8\]  { color: #3c3c43 !important; }
 [data-theme="light"] .text-\[#b8bacc\]  { color: #3c3c43 !important; }
 [data-theme="light"] .text-\[#b0b0c4\]  { color: #48484e !important; }
+[data-theme="light"] .text-\[#b0b2cc\]  { color: #48484e !important; }
 [data-theme="light"] .text-\[#a8a8b4\]  { color: #58585e !important; }
+[data-theme="light"] .text-\[#a8aac4\]  { color: #48484e !important; }
+[data-theme="light"] .text-\[#a0a2bc\]  { color: #505056 !important; }
+[data-theme="light"] .text-\[#a0a0a0\]  { color: #606060 !important; }
 [data-theme="light"] .text-\[#9a9cb8\]  { color: #48484e !important; }
 [data-theme="light"] .text-\[#9a9cc0\]  { color: #48484e !important; }
+[data-theme="light"] .text-\[#8b8fa8\]  { color: #58585e !important; }
 [data-theme="light"] .text-\[#8a8ca8\]  { color: #58585e !important; }
+[data-theme="light"] .text-\[#8a8cb8\]  { color: #58585e !important; }
+[data-theme="light"] .text-\[#8082a0\]  { color: #636366 !important; }
+[data-theme="light"] .text-\[#888888\]  { color: #636366 !important; }
 [data-theme="light"] .text-\[#737373\]  { color: #636366 !important; }
-[data-theme="light"] .text-\[#d4d4d8\]  { color: #3c3c43 !important; }
 
-/* 텍스트 — 거의 안 보이던 어두운 색 → 가시성 있게 */
+/* ▸ 텍스트 — 어두운 색(다크모드 뮤트) → 가시성 있게 */
+[data-theme="light"] .text-\[#7a7c94\]  { color: #68686e !important; }
+[data-theme="light"] .text-\[#7a7c98\]  { color: #68686e !important; }
 [data-theme="light"] .text-\[#6b6e8c\]  { color: #707074 !important; }
 [data-theme="light"] .text-\[#5a5c78\]  { color: #80808a !important; }
 [data-theme="light"] .text-\[#505272\]  { color: #88888e !important; }
-[data-theme="light"] .text-\[#404060\]  { color: #909096 !important; }
-[data-theme="light"] .text-\[#35374e\]  { color: #909096 !important; }
-[data-theme="light"] .text-\[#3d3f52\]  { color: #90909a !important; }
+[data-theme="light"] .text-\[#505050\]  { color: #707070 !important; }
+[data-theme="light"] .text-\[#505070\]  { color: #707074 !important; }
 [data-theme="light"] .text-\[#4a4c68\]  { color: #888890 !important; }
+[data-theme="light"] .text-\[#404060\]  { color: #909096 !important; }
+[data-theme="light"] .text-\[#404040\]  { color: #909090 !important; }
+[data-theme="light"] .text-\[#3d3f52\]  { color: #90909a !important; }
+[data-theme="light"] .text-\[#3a3c58\]  { color: #a0a0a6 !important; }
+[data-theme="light"] .text-\[#3a3c50\]  { color: #a0a0a6 !important; }
+[data-theme="light"] .text-\[#35374e\]  { color: #909096 !important; }
+[data-theme="light"] .text-\[#303048\]  { color: #a8a8ae !important; }
+[data-theme="light"] .text-\[#2a2c40\]  { color: #b0b0b6 !important; }
+[data-theme="light"] .text-\[#2a2c3a\]  { color: #b0b0b6 !important; }
+[data-theme="light"] .text-\[#2a2a2a\]  { color: #6e6e6e !important; }
 [data-theme="light"] .text-\[#252838\]  { color: #a0a0a8 !important; }
 
-/* 보더 */
-[data-theme="light"] .border-\[#1a1c28\]  { border-color: #e0e0e5 !important; }
+/* ▸ 텍스트 — 액센트 컬러 유지 (라이트에서도 동일) */
+[data-theme="light"] .text-\[#818cf8\]  { color: #4f46e5 !important; }
+[data-theme="light"] .text-\[#6366f1\]  { color: #4f46e5 !important; }
+[data-theme="light"] .text-\[#7ab3ff\]  { color: #2563eb !important; }
+[data-theme="light"] .text-\[#7dd3fc\]  { color: #0284c7 !important; }
+[data-theme="light"] .text-\[#a78bfa\]  { color: #7c3aed !important; }
+
+/* ▸ 보더 */
 [data-theme="light"] .border-\[#13141c\]  { border-color: #eaeaee !important; }
 [data-theme="light"] .border-\[#14151e\]  { border-color: #e8e8ec !important; }
+[data-theme="light"] .border-\[#181a26\]  { border-color: #e2e2e7 !important; }
+[data-theme="light"] .border-\[#1a1c28\]  { border-color: #e0e0e5 !important; }
+[data-theme="light"] .border-\[#1a1c2e\]  { border-color: #e0e0e5 !important; }
+[data-theme="light"] .border-\[#1c1e2a\]  { border-color: #e0e0e6 !important; }
+[data-theme="light"] .border-\[#1c1e2c\]  { border-color: #e0e0e6 !important; }
+[data-theme="light"] .border-\[#1e2030\]  { border-color: #dcdce2 !important; }
+[data-theme="light"] .border-\[#1c1c22\]  { border-color: #e2e2e6 !important; }
 [data-theme="light"] .border-\[#2a2a2a\]  { border-color: #d8d8dd !important; }
 [data-theme="light"] .border-\[#2a2c40\]  { border-color: #d5d5da !important; }
 [data-theme="light"] .border-\[#252840\]  { border-color: #d0d0d5 !important; }
-[data-theme="light"] .border-\[#1c1e2a\]  { border-color: #e0e0e6 !important; }
+[data-theme="light"] .border-\[#2e3048\]  { border-color: #c8c8cd !important; }
+[data-theme="light"] .border-\[#2e3050\]  { border-color: #c8c8cd !important; }
+[data-theme="light"] .border-\[#3a3c58\]  { border-color: #c0c0c6 !important; }
+[data-theme="light"] .border-\[#4a4c6a\]  { border-color: #6366f1 !important; }
+[data-theme="light"] .border-\[#6a6c98\]  { border-color: #6366f1 !important; }
 [data-theme="light"] .divide-\[#14151e\] > :not([hidden]) ~ :not([hidden]) {
   border-color: #eaeaee !important;
 }
 
-/* 플레이스홀더 */
-[data-theme="light"] .placeholder-\[#404040\]::placeholder { color: #b0b0b5 !important; }
-[data-theme="light"] .placeholder-\[#2e3048\]::placeholder { color: #b8b8bd !important; }
+/* ▸ 추가 보더 */
+[data-theme="light"] .border-\[#222\]      { border-color: #d8d8dc !important; }
+[data-theme="light"] .border-\[#333\]      { border-color: #cccccc !important; }
+[data-theme="light"] .border-\[#2e3060\]   { border-color: #6366f1 !important; }
 
-/* 인풋 배경 */
-[data-theme="light"] .bg-\[#1a1a1a\]  { background-color: #f8f8fb !important; }
-[data-theme="light"] .bg-\[#0f1018\]  { background-color: #ffffff !important; }
+/* ▸ 플레이스홀더 */
+[data-theme="light"] .placeholder-\[#333\]::placeholder        { color: #c0c0c5 !important; }
+[data-theme="light"] .placeholder-\[#404040\]::placeholder     { color: #b0b0b5 !important; }
+[data-theme="light"] .placeholder-\[#404060\]::placeholder     { color: #b0b0b5 !important; }
+[data-theme="light"] .placeholder-\[#2e3048\]::placeholder     { color: #b8b8bd !important; }
+[data-theme="light"] .placeholder-\[#2a2c48\]::placeholder     { color: #b8b8bd !important; }
+[data-theme="light"] .placeholder-\[#3a3c58\]::placeholder     { color: #b8b8bd !important; }
+
+/* ▸ 추가 배경 */
+[data-theme="light"] .bg-\[#131318\]  { background-color: #f0f0f4 !important; }
+[data-theme="light"] .bg-\[#222\]     { background-color: #e8e8ec !important; }
+[data-theme="light"] .bg-\[#333\]     { background-color: #d0d0d4 !important; }
+[data-theme="light"] .bg-\[#2a2a2a\]  { background-color: #dedede !important; }
+[data-theme="light"] .bg-\[#b8b8c0\]  { background-color: #9c9ca0 !important; }
+[data-theme="light"] .bg-\[#d4d4d8\]  { background-color: #636366 !important; }
+
+/* ▸ 추가 텍스트 */
+[data-theme="light"] .text-\[#333\]    { color: #888888 !important; }
+[data-theme="light"] .text-\[#555\]    { color: #888888 !important; }
+[data-theme="light"] .text-\[#0f0f0f\] { color: #ffffff !important; }
+[data-theme="light"] .text-\[#7a4040\] { color: #c0202a !important; }
+[data-theme="light"] .text-\[#9a4040\] { color: #c0202a !important; }
+[data-theme="light"] .text-\[#4a3040\] { color: #c0202a !important; }
+[data-theme="light"] .text-\[#6b8cc8\] { color: #2563eb !important; }
+[data-theme="light"] .text-\[#4285f4\] { color: #1a73e8 !important; }
+
+/* ▸ SkillPanel / InboxCard 추가 배경 */
+[data-theme="light"] .bg-\[#12131e\]   { background-color: #f2f2f5 !important; }
+[data-theme="light"] .bg-\[#0a0b10\]   { background-color: #f5f5f8 !important; }
+[data-theme="light"] .bg-\[#4285f4\]\/8  { background-color: rgba(26,115,232,0.08) !important; }
+[data-theme="light"] .bg-\[#4285f4\]\/15 { background-color: rgba(26,115,232,0.12) !important; }
+[data-theme="light"] .bg-\[#4285f4\]\/20 { background-color: rgba(26,115,232,0.15) !important; }
+
+/* ▸ SkillPanel / InboxCard 추가 보더 */
+[data-theme="light"] .border-\[#4285f4\]\/20 { border-color: rgba(26,115,232,0.3) !important; }
+[data-theme="light"] .border-\[#4285f4\]\/30 { border-color: rgba(26,115,232,0.35) !important; }
+[data-theme="light"] .border-\[#0ea5e9\]\/20 { border-color: rgba(14,165,233,0.3) !important; }
+[data-theme="light"] .border-\[#252840\]  { border-color: #d0d0d5 !important; }
+
+/* ▸ Calendar 추가 배경 */
+[data-theme="light"] .bg-\[#080910\]\/30  { background-color: rgba(240,240,248,0.5) !important; }
+
+/* ▸ Calendar 추가 보더 */
+[data-theme="light"] .border-\[#1a1c2e\]\/50 { border-color: rgba(224,224,229,0.5) !important; }
+
+/* ▸ Tasks 추가 배경 */
+[data-theme="light"] .bg-\[#404040\]  { background-color: #d0d0d0 !important; }
+[data-theme="light"] .bg-\[#333\]\/10 { background-color: rgba(0,0,0,0.05) !important; }
+
+/* ▸ Settings 추가 보더 */
+[data-theme="light"] .border-\[#3a3a3a\]  { border-color: #c0c0c0 !important; }
+[data-theme="light"] .border-\[#3a3a5a\]  { border-color: #bebec8 !important; }
+[data-theme="light"] .border-\[#6a6c98\]  { border-color: #6366f1 !important; }
+
+/* ▸ Settings 추가 텍스트 */
+[data-theme="light"] .text-\[#8a8cb8\]  { color: #58585e !important; }
 
 body {
   margin: 0;

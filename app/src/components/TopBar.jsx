@@ -109,6 +109,7 @@ const NAV_ITEMS = [
   { to: '/tasks', label: '태스크', icon: 'tasks' },
   { to: '/people', label: '인물', icon: 'people' },
   { to: '/calendar', label: '캘린더', icon: 'calendar' },
+  { to: '/skills', label: '스킬', icon: 'skills' },
 ]
 
 export default function TopBar({ syncStatus = {}, newCount = 0, onNavigateToItem }) {

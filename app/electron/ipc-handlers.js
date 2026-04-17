@@ -837,6 +837,175 @@ function setupIpcHandlers(ipcMain, getWindow) {
     }
   })
 
+  ipcMain.handle('onboarding:reset', () => {
+    store.set('onboardingDone', false)
+    return { success: true }
+  })
+
+  // ─── User Profile (Cold Start) ────────────────────────────────
+
+  ipcMain.handle('profile:get', () => {
+    return vault.getUserProfile() || {}
+  })
+
+  ipcMain.handle('profile:save', (_event, profileFields) => {
+    try {
+      const updated = vault.saveUserProfile(profileFields)
+      return { success: true, profile: updated }
+    } catch (e) {
+      return { error: e.message }
+    }
+  })
+
+  // user_question_generator: 대화 히스토리를 받아 다음 질문 생성
+  // history: [{ role: 'assistant'|'user', content: string }]
+  // answeredCount: 지금까지 답변 완료된 질문 수
+  ipcMain.handle('profile:next-question', async (_event, { history = [], answeredCount = 0 }) => {
+    try {
+      const Anthropic = require('@anthropic-ai/sdk')
+      const apiKey = store.get('anthropicKey')
+      if (!apiKey) return { error: 'API 키 없음' }
+      const client = new Anthropic({ apiKey })
+
+      const SYSTEM = `당신은 기업용 AI 에이전트의 온보딩 도우미입니다.
+새 사용자가 에이전트를 처음 사용할 때 그 사람의 업무 맥락을 최대한 깊이 파악해야 합니다.
+
+파악해야 할 정보 레이어:
+- Layer 1 (기본 신원): 이름, 직책, 소속 팀/부서, 회사
+- Layer 2 (업무 맥락): 현재 진행 프로젝트, 반복 업무, 자주 쓰는 문서 형식
+- Layer 3 (관계망): 상사/팀원/협업 부서, 외부 거래처/클라이언트
+- Layer 4 (커뮤니케이션): 주요 보고 방식, 의사결정 권한 범위
+- Layer 5 (도메인): 직무 전문 용어, 업계/산업군
+
+규칙:
+1. 총 5~7개의 질문으로 위 레이어를 커버한다
+2. 이전 답변을 바탕으로 자연스럽게 이어지는 질문을 생성한다
+3. 한 번에 한 가지만 묻는다 (복합 질문 금지)
+4. 이미 답변된 내용은 다시 묻지 않는다
+5. ${answeredCount}개의 질문이 이미 완료됐다
+6. 5개 이상 완료되고 Layer 1~3이 모두 파악됐으면 JSON: {"done": true} 반환
+7. 그 외에는 JSON: {"question": "질문 내용", "layer": 1~5} 형식으로만 반환`
+
+      const messages = history.length > 0 ? history : []
+      const response = await client.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 300,
+        system: SYSTEM,
+        messages: messages.length > 0 ? messages : [{ role: 'user', content: '시작해주세요' }],
+      })
+
+      const raw = response.content[0]?.text?.trim() || '{}'
+      const jsonMatch = raw.match(/\{[\s\S]*\}/)
+      const result = jsonMatch ? JSON.parse(jsonMatch[0]) : { question: raw }
+      return { success: true, ...result }
+    } catch (e) {
+      console.error('[Profile] 질문 생성 오류:', e.message)
+      return { error: e.message }
+    }
+  })
+
+  // Cold Start 분석: 수집된 대화 히스토리 → 구조화된 프로필 생성
+  ipcMain.handle('profile:analyze', async (_event, { history = [] }) => {
+    try {
+      const Anthropic = require('@anthropic-ai/sdk')
+      const apiKey = store.get('anthropicKey')
+      if (!apiKey) return { error: 'API 키 없음' }
+      const client = new Anthropic({ apiKey })
+
+      const conversation = history
+        .map(m => `${m.role === 'assistant' ? 'AI' : '사용자'}: ${m.content}`)
+        .join('\n')
+
+      const response = await client.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1000,
+        system: '대화 내용을 분석해서 아래 JSON 형식으로만 반환하세요. 없는 정보는 null.',
+        messages: [{
+          role: 'user',
+          content: `대화:\n${conversation}\n\n위 대화에서 다음 정보를 추출하세요:\n{\n  "name": "이름",\n  "title": "직책",\n  "department": "부서",\n  "company": "회사",\n  "industry": "업계",\n  "projects": ["진행중 프로젝트"],\n  "workTypes": ["주요 업무 유형"],\n  "teammates": ["팀원 이름"],\n  "clients": ["거래처/클라이언트"],\n  "communication": "주요 보고/소통 방식",\n  "domain_keywords": ["전문 용어/키워드"],\n  "summary": "한 줄 요약"\n}`,
+        }],
+      })
+
+      const raw = response.content[0]?.text?.trim() || '{}'
+      const jsonMatch = raw.match(/\{[\s\S]*\}/)
+      const profile = jsonMatch ? JSON.parse(jsonMatch[0]) : {}
+      return { success: true, profile }
+    } catch (e) {
+      return { error: e.message }
+    }
+  })
+
+  // ─── Custom Skills ─────────────────────────────────────────────
+
+  ipcMain.handle('skill:list-custom', () => {
+    return vault.getCustomSkills()
+  })
+
+  ipcMain.handle('skill:save-custom', (_event, skill) => {
+    try {
+      const saved = vault.saveCustomSkill(skill)
+      return { success: true, skill: saved }
+    } catch (e) {
+      return { error: e.message }
+    }
+  })
+
+  ipcMain.handle('skill:delete-custom', (_event, { id }) => {
+    const ok = vault.deleteCustomSkill(id)
+    return { success: ok }
+  })
+
+  // 자연어 → 스킬 자동 생성
+  ipcMain.handle('skill:generate', async (_event, { description, existingSkill = null }) => {
+    try {
+      const Anthropic = require('@anthropic-ai/sdk')
+      const apiKey = store.get('anthropicKey')
+      if (!apiKey) return { error: 'API 키 없음' }
+      const client = new Anthropic({ apiKey })
+
+      const action = existingSkill ? '수정' : '생성'
+      const baseInfo = existingSkill
+        ? `\n\n기존 스킬:\n${JSON.stringify(existingSkill, null, 2)}`
+        : ''
+
+      const response = await client.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1500,
+        system: `당신은 AI 스킬 빌더입니다. 사용자의 요청을 분석해서 업무 자동화 스킬을 ${action}해 주세요.
+스킬은 텍스트 입력을 받아 특정 형식/목적으로 변환하는 AI 프롬프트입니다.
+
+반드시 아래 JSON 형식으로만 반환하세요:
+{
+  "label": "스킬 이름 (2~6글자)",
+  "icon": "단일 이모지 또는 특수문자",
+  "color": "#hex색상",
+  "desc": "한 줄 설명 (10자 이내)",
+  "detail": "상세 설명 (30자 이내)",
+  "systemPrompt": "이 스킬의 AI 시스템 프롬프트 (핵심, 구체적으로)",
+  "examples": ["입력 예시 1", "입력 예시 2", "입력 예시 3"],
+  "tip": "사용 팁 (선택)"
+}`,
+        messages: [{
+          role: 'user',
+          content: `요청: ${description}${baseInfo}`,
+        }],
+      })
+
+      const raw = response.content[0]?.text?.trim() || '{}'
+      const jsonMatch = raw.match(/\{[\s\S]*\}/)
+      if (!jsonMatch) return { error: '스킬 생성 실패: 응답 파싱 오류' }
+
+      const skillDef = JSON.parse(jsonMatch[0])
+      // 기존 스킬 수정이면 id 유지
+      if (existingSkill?.id) skillDef.id = existingSkill.id
+
+      return { success: true, skill: skillDef }
+    } catch (e) {
+      console.error('[Skill] 생성 오류:', e.message)
+      return { error: e.message }
+    }
+  })
+
   ipcMain.handle('onboarding:import', async (_event, { filePaths }) => {
     try {
       const win = getWindow()
@@ -996,6 +1165,8 @@ function setupIpcHandlers(ipcMain, getWindow) {
         hasGdriveClientId: !!store.get('gdriveClientId'),
         hasGdriveClientSecret: !!store.get('gdriveClientSecret'),
         gdriveConnected: gdrive.isConnected(),
+        // 숨긴 기본 스킬
+        hiddenSkills: store.get('hiddenSkills') || [],
       }
     } catch (error) {
       return { error: error.message }
@@ -1061,6 +1232,9 @@ function setupIpcHandlers(ipcMain, getWindow) {
       }
       if (params.gdriveClientSecret !== undefined) {
         store.set('gdriveClientSecret', params.gdriveClientSecret)
+      }
+      if (params.hiddenSkills !== undefined) {
+        store.set('hiddenSkills', params.hiddenSkills)
       }
       return { success: true, hasFullDiskAccess: checkFullDiskAccess() }
     } catch (error) {
@@ -1243,8 +1417,10 @@ function setupIpcHandlers(ipcMain, getWindow) {
   })
 
   ipcMain.handle('permissions:request-fda', async () => {
-    const win = getWindow()
-    if (win) await showFullDiskAccessDialog(win)
+    const { shell } = require('electron')
+    await shell.openExternal(
+      'x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles'
+    )
     return { hasAccess: checkFullDiskAccess() }
   })
 
@@ -1294,72 +1470,6 @@ function setupIpcHandlers(ipcMain, getWindow) {
       return { success: true, categories: next }
     } catch (error) {
       return { success: false, error: error.message }
-    }
-  })
-
-  // ─── 음성 인식 (STT) — 로컬 Whisper 모델 ────────────────
-  let _whisperPipeline = null
-  let _whisperLoading  = false
-
-  async function getWhisperPipeline(win) {
-    if (_whisperPipeline) return _whisperPipeline
-    if (_whisperLoading) {
-      while (_whisperLoading) await new Promise(r => setTimeout(r, 200))
-      return _whisperPipeline
-    }
-    _whisperLoading = true
-    try {
-      const { pipeline, env } = require('@xenova/transformers')
-      env.allowLocalModels = false
-      env.useBrowserCache   = false
-      // 모델 로딩 진행 상황을 렌더러로 전송
-      const sendProgress = (msg) => {
-        if (win && !win.isDestroyed()) win.webContents.send('stt:model-progress', msg)
-      }
-      sendProgress('모델 로딩 중... (최초 실행 시 약 150MB 다운로드)')
-      _whisperPipeline = await pipeline(
-        'automatic-speech-recognition',
-        'Xenova/whisper-tiny',
-        { quantized: true }
-      )
-      sendProgress(null)
-      _whisperLoading = false
-      return _whisperPipeline
-    } catch (e) {
-      _whisperLoading = false
-      throw e
-    }
-  }
-
-  // WAV 버퍼 → Float32Array PCM 샘플 디코딩
-  function decodeWAV(buf) {
-    const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
-    const sampleRate = view.getUint32(24, true)
-    const numSamples = (buf.length - 44) / 2
-    const samples = new Float32Array(numSamples)
-    for (let i = 0; i < numSamples; i++) {
-      samples[i] = view.getInt16(44 + i * 2, true) / 32768.0
-    }
-    return { data: samples, sampling_rate: sampleRate }
-  }
-
-  ipcMain.handle('stt:transcribe', async (_event, { wavBuffer }) => {
-    try {
-      const pipe = await getWhisperPipeline(win)
-      const buf  = Buffer.from(wavBuffer)
-      const { data, sampling_rate } = decodeWAV(buf)
-      const result = await pipe(
-        { data, sampling_rate },
-        { language: 'korean', task: 'transcribe' }
-      )
-      const text = (result?.text || '').trim()
-      // 인식 완료 후 모델 메모리 해제 (~150-300MB 회수)
-      _whisperPipeline = null
-      if (text) return { success: true, text }
-      return { success: false, error: '음성을 인식하지 못했습니다' }
-    } catch (e) {
-      _whisperPipeline = null
-      return { success: false, error: e.message }
     }
   })
 
@@ -1465,19 +1575,32 @@ function setupIpcHandlers(ipcMain, getWindow) {
   })
 
   // ─── 스킬 실행 & 출력물 관리 ────────────────────────────────
-  ipcMain.handle('skill:run', async (_event, { skillId, input, sourceItemId, messages }) => {
+  ipcMain.handle('skill:run', async (_event, { skillId, input, sourceItemId, messages, customPrompt }) => {
     try {
       const { runSkill } = require('./core/ai')
       const SKILL_LABELS = {
         summary: '요약', translate: '번역', minutes: '회의록', report: '보고서',
         kpi: 'KPI 현황', slides: '슬라이드', budget: '예산표', notebook: '노트', onboarding: '온보딩', hwp: '공문서(HWP)',
       }
-      const result = await runSkill(skillId, input, { messages: messages || [] })
+      // 커스텀 스킬이면 vault에서 systemPrompt 조회 (또는 직접 전달된 customPrompt 사용)
+      let resolvedPrompt = customPrompt || null
+      if (!resolvedPrompt && skillId?.startsWith('custom-')) {
+        const customSkills = vault.getCustomSkills()
+        const found = customSkills.find(s => s.id === skillId)
+        if (found?.systemPrompt) resolvedPrompt = found.systemPrompt
+      }
+      const result = await runSkill(skillId, input, { messages: messages || [], customPrompt: resolvedPrompt })
       const { output, messages: nextMessages } = result
 
       // 첫 번째 호출(messages 없음)에만 vault에 저장
       let savedId = null
       if (!messages || messages.length === 0) {
+        // 커스텀 스킬 레이블 조회
+        if (skillId?.startsWith('custom-')) {
+          const customSkills = vault.getCustomSkills()
+          const found = customSkills.find(s => s.id === skillId)
+          if (found) SKILL_LABELS[skillId] = found.label
+        }
         const skillLabel = SKILL_LABELS[skillId] || skillId
         const saved = vault.saveSkillOutput({ skillId, skillLabel, input, output, sourceItemId })
         savedId = saved.id
@@ -1692,7 +1815,116 @@ function setupIpcHandlers(ipcMain, getWindow) {
     }
   })
 
-}
+  // ─── 스킬 마켓플레이스 ──────────────────────────────────────────
+
+  const DEFAULT_MARKET_URL = 'http://localhost:3333'
+  function getMarketUrl() {
+    return (store.get('marketplaceUrl') || DEFAULT_MARKET_URL).replace(/\/$/, '')
+  }
+
+  ipcMain.handle('marketplace:get-url', () => getMarketUrl())
+
+  ipcMain.handle('marketplace:set-url', (_event, { url }) => {
+    store.set('marketplaceUrl', url)
+    return { success: true }
+  })
+
+  ipcMain.handle('marketplace:list', async (_event, { q = '', category = 'all', sort = 'popular', page = 1 } = {}) => {
+    try {
+      const base = getMarketUrl()
+      const params = new URLSearchParams({ q, category, sort, page: String(page), limit: '24' })
+      const res = await fetch(`${base}/api/skills?${params}`)
+      if (!res.ok) throw new Error(`서버 오류: ${res.status}`)
+      return await res.json()
+    } catch (e) {
+      return { error: e.message, skills: [], total: 0, pages: 0, page: 1 }
+    }
+  })
+
+  ipcMain.handle('marketplace:publish', async (_event, { skill, authorName }) => {
+    try {
+      const base = getMarketUrl()
+      const authorId    = store.get('marketAuthorId')    || (() => { const id = require('crypto').randomUUID(); store.set('marketAuthorId', id); return id })()
+      const authorToken = store.get('marketAuthorToken') || (() => { const tk = require('crypto').randomUUID(); store.set('marketAuthorToken', tk); return tk })()
+      const body = {
+        label: skill.label, icon: skill.icon, color: skill.color,
+        desc: skill.desc, detail: skill.detail,
+        system_prompt: skill.systemPrompt,
+        examples: skill.examples || [], tip: skill.tip || '',
+        author_name: authorName || store.get('marketAuthorName') || '익명',
+        author_id: authorId, author_token: authorToken,
+        category: skill.category || 'general', tags: skill.tags || [],
+      }
+      const res = await fetch(`${base}/api/skills`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json()
+      if (!res.ok) return { error: data.error || '등록 실패' }
+      if (authorName) store.set('marketAuthorName', authorName)
+      return { success: true, marketId: data.id }
+    } catch (e) {
+      return { error: e.message }
+    }
+  })
+
+  ipcMain.handle('marketplace:install', async (_event, { id }) => {
+    try {
+      const base = getMarketUrl()
+      const res  = await fetch(`${base}/api/skills/${id}`)
+      if (!res.ok) throw new Error('스킬을 불러올 수 없습니다')
+      const data = await res.json()
+      const saved = vault.saveCustomSkill({
+        label: data.label, icon: data.icon, color: data.color,
+        desc: data.desc, detail: data.detail,
+        systemPrompt: data.system_prompt,
+        examples: data.examples, tip: data.tip,
+        type: 'custom', source: 'market', marketId: data.id,
+      })
+      fetch(`${base}/api/skills/${id}/install`, { method: 'POST' }).catch(() => {})
+      return { success: true, skill: saved }
+    } catch (e) {
+      return { error: e.message }
+    }
+  })
+
+  ipcMain.handle('marketplace:like', async (_event, { id }) => {
+    try {
+      const base     = getMarketUrl()
+      const clientId = store.get('marketAuthorId') || (() => { const cid = require('crypto').randomUUID(); store.set('marketAuthorId', cid); return cid })()
+      const res = await fetch(`${base}/api/skills/${id}/like`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client_id: clientId }),
+      })
+      return await res.json()
+    } catch (e) {
+      return { error: e.message }
+    }
+  })
+
+  ipcMain.handle('marketplace:unpublish', async (_event, { marketId }) => {
+    try {
+      const base = getMarketUrl()
+      const authorToken = store.get('marketAuthorToken')
+      if (!authorToken) return { error: '삭제 권한 없음' }
+      const res = await fetch(`${base}/api/skills/${marketId}`, {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ author_token: authorToken }),
+      })
+      const data = await res.json()
+      if (!res.ok) return { error: data.error || '삭제 실패' }
+      return { success: true }
+    } catch (e) {
+      return { error: e.message }
+    }
+  })
+
+  ipcMain.handle('marketplace:get-author', () => ({
+    authorId:   store.get('marketAuthorId'),
+    authorName: store.get('marketAuthorName') || '',
+  }))
+
+} // end setupIpcHandlers
 
 // 파일 업로드 처리 공통 함수 (IPC + WatchFolder 모두 사용)
 async function processFileUpload(filePath, win) {
@@ -1706,28 +1938,30 @@ async function processFileUpload(filePath, win) {
     const analysis = await analyzeImageFile(filePath, context)
     const rawText = `[이미지: ${fileName}] ${analysis.summary || ''}`
     return processIncomingMessage(rawText, 'file', win, { preAnalyzed: analysis, forceCalendar: true })
-  } else {
-    const rawText = await extractText(filePath)
-    const source = inferSource(filePath, rawText)
-    const ext = path.extname(filePath).toLowerCase()
-
-    // 파일 타입별 자동 스킬 힌트
-    const SKILL_HINT_MAP = {
-      '.hwp':  'hwp',
-      '.hwpx': 'hwp',
-      '.vtt':  'minutes',
-      '.pdf':  'summary',
-      '.docx': 'summary',
-    }
-    const skillHint = SKILL_HINT_MAP[ext] || null
-    const originalFilePath = ['.hwp', '.hwpx'].includes(ext) ? filePath : null
-
-    return processIncomingMessage(rawText, source, win, {
-      forceCalendar: true,
-      skillHint,
-      originalFilePath,
-    })
   }
+
+  // 일반 텍스트/문서 파일
+  const extracted = await extractText(filePath)
+  const rawText = typeof extracted === 'string' ? extracted : String(extracted)
+  const source = inferSource(filePath, rawText)
+  const ext = path.extname(filePath).toLowerCase()
+
+  // 파일 타입별 자동 스킬 힌트
+  const SKILL_HINT_MAP = {
+    '.hwp':  'hwp',
+    '.hwpx': 'hwp',
+    '.vtt':  'minutes',
+    '.pdf':  'summary',
+    '.docx': 'summary',
+  }
+  const skillHint = SKILL_HINT_MAP[ext] || null
+  const originalFilePath = ['.hwp', '.hwpx'].includes(ext) ? filePath : null
+
+  return processIncomingMessage(rawText, source, win, {
+    forceCalendar: true,
+    skillHint,
+    originalFilePath,
+  })
 }
 
 function safeJsonParse(str, fallback) {
