@@ -79,6 +79,13 @@ export default function Settings({ embedded = false }) {
   const [marketTestStatus, setMarketTestStatus] = useState(null) // null|'ok'|'fail'
   const [marketTestMsg, setMarketTestMsg]   = useState('')
 
+  // 사용자 프로필 (Cold Start)
+  const [userProfile, setUserProfile] = useState(null)
+  const [profileLoaded, setProfileLoaded] = useState(false)
+  const [profileSaving, setProfileSaving] = useState(false)
+  const [editingProfile, setEditingProfile] = useState(false)
+  const [profileDraft, setProfileDraft] = useState({})
+
   // 개발용 테스트
   const [testText, setTestText] = useState('')
   const [testSource, setTestSource] = useState('test')
@@ -138,6 +145,11 @@ export default function Settings({ embedded = false }) {
         if (url)           setMarketUrl(url)
         if (author?.authorName) setMarketAuthorName(author.authorName)
       } catch {}
+      try {
+        const profile = await window.tidy?.profile.get?.()
+        if (profile) { setUserProfile(profile); setProfileDraft(profile) }
+        setProfileLoaded(true)
+      } catch { setProfileLoaded(true) }
     }
     loadSettings()
 
@@ -338,6 +350,174 @@ export default function Settings({ embedded = false }) {
                     {saving ? '저장 중...' : '저장'}
                   </button>
                 </form>
+              </div>
+
+              {/* ── 사용자 프로필 (Cold Start) ── */}
+              <div className="pt-4 border-t border-[#2a2a2a]">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h2 className="text-sm font-semibold text-[#e5e5e5]">내 프로필</h2>
+                    <p className="text-xs text-[#737373] mt-0.5">AI가 나를 더 잘 이해할 수 있도록 도와줍니다</p>
+                  </div>
+                  {userProfile && !editingProfile && (
+                    <button
+                      onClick={() => { setProfileDraft({ ...userProfile }); setEditingProfile(true) }}
+                      className="text-xs text-[#6366f1] hover:text-[#818cf8] border border-[#6366f1]/30 hover:border-[#6366f1]/60 px-2.5 py-1.5 rounded-lg transition-colors"
+                    >
+                      수정
+                    </button>
+                  )}
+                </div>
+
+                {!profileLoaded ? (
+                  <div className="flex gap-1 py-4"><span className="w-1.5 h-1.5 rounded-full bg-[#303050] animate-pulse" /><span className="w-1.5 h-1.5 rounded-full bg-[#303050] animate-pulse" style={{ animationDelay: '150ms' }} /><span className="w-1.5 h-1.5 rounded-full bg-[#303050] animate-pulse" style={{ animationDelay: '300ms' }} /></div>
+                ) : !userProfile && !editingProfile ? (
+                  <div className="p-4 bg-[#0d0e16] border border-dashed border-[#1c1e2c] rounded-xl text-center">
+                    <p className="text-xs text-[#404060] mb-3">프로필이 없습니다. 온보딩을 다시 실행해 프로필을 만드세요.</p>
+                    <button
+                      onClick={async () => {
+                        await window.tidy?.onboarding.reset()
+                        window.location.reload()
+                      }}
+                      className="text-xs text-[#6366f1] hover:text-[#818cf8] border border-[#6366f1]/30 hover:border-[#6366f1]/60 px-3 py-1.5 rounded-lg transition-colors"
+                    >
+                      온보딩 다시 실행
+                    </button>
+                  </div>
+                ) : editingProfile ? (
+                  <div className="space-y-3">
+                    {[
+                      { key: 'name',         label: '이름' },
+                      { key: 'title',        label: '직책' },
+                      { key: 'department',   label: '부서' },
+                      { key: 'company',      label: '회사' },
+                      { key: 'industry',     label: '업계' },
+                      { key: 'communication',label: '소통 방식' },
+                    ].map(({ key, label }) => (
+                      <div key={key}>
+                        <label className="block text-[10px] font-semibold text-[#505272] uppercase tracking-wide mb-1">{label}</label>
+                        <input
+                          value={profileDraft[key] || ''}
+                          onChange={e => setProfileDraft(p => ({ ...p, [key]: e.target.value }))}
+                          className="w-full bg-[#09090c] border border-[#1a1c28] rounded-lg px-3 py-1.5 text-xs text-[#c8c8d8] placeholder-[#2a2c48] focus:outline-none focus:border-[#6366f1]/40"
+                          placeholder={label}
+                        />
+                      </div>
+                    ))}
+                    {[
+                      { key: 'domain_keywords', label: '전문 키워드', placeholder: '키워드1, 키워드2' },
+                      { key: 'projects',        label: '진행 중인 프로젝트', placeholder: '프로젝트1, 프로젝트2' },
+                      { key: 'teammates',       label: '팀원 이름', placeholder: '홍길동, 김영희' },
+                      { key: 'clients',         label: '주요 거래처', placeholder: '클라이언트A, B사' },
+                    ].map(({ key, label, placeholder }) => (
+                      <div key={key}>
+                        <label className="block text-[10px] font-semibold text-[#505272] uppercase tracking-wide mb-1">{label}</label>
+                        <input
+                          value={Array.isArray(profileDraft[key]) ? profileDraft[key].join(', ') : (profileDraft[key] || '')}
+                          onChange={e => {
+                            const arr = e.target.value.split(',').map(s => s.trim()).filter(Boolean)
+                            setProfileDraft(p => ({ ...p, [key]: arr }))
+                          }}
+                          className="w-full bg-[#09090c] border border-[#1a1c28] rounded-lg px-3 py-1.5 text-xs text-[#c8c8d8] placeholder-[#2a2c48] focus:outline-none focus:border-[#6366f1]/40"
+                          placeholder={placeholder}
+                        />
+                        <p className="text-[10px] text-[#303050] mt-0.5">쉼표로 구분</p>
+                      </div>
+                    ))}
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        onClick={() => setEditingProfile(false)}
+                        className="flex-1 py-1.5 text-xs text-[#505272] hover:text-[#9a9cb8] border border-[#1a1c28] hover:border-[#252840] rounded-lg transition-colors"
+                      >취소</button>
+                      <button
+                        onClick={async () => {
+                          setProfileSaving(true)
+                          try {
+                            const res = await window.tidy?.profile.save(profileDraft)
+                            if (res?.success) {
+                              setUserProfile(res.profile || profileDraft)
+                              setEditingProfile(false)
+                              showFeedback('ok', '프로필이 저장됐습니다')
+                            } else showFeedback('error', res?.error || '저장 실패')
+                          } catch (e) { showFeedback('error', e.message) }
+                          finally { setProfileSaving(false) }
+                        }}
+                        disabled={profileSaving}
+                        className="flex-[2] py-1.5 text-xs font-semibold text-white bg-[#6366f1] hover:bg-[#5254cc] disabled:opacity-40 rounded-lg transition-colors"
+                      >{profileSaving ? '저장 중...' : '저장'}</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {userProfile.name && (
+                      <div className="flex items-center gap-3 p-3 bg-[#0d0e16] border border-[#1c1e2c] rounded-xl">
+                        <div className="w-9 h-9 rounded-full bg-[#6366f1]/20 flex items-center justify-center text-sm font-semibold text-[#818cf8] flex-shrink-0">
+                          {userProfile.name.charAt(0)}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-[#e0e0f0]">{userProfile.name}</p>
+                          <p className="text-xs text-[#6b6e8c]">
+                            {[userProfile.title, userProfile.department, userProfile.company].filter(Boolean).join(' · ')}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                    <div className="grid grid-cols-2 gap-2">
+                      {userProfile.industry && (
+                        <div className="p-2.5 bg-[#09090c] border border-[#1a1c28] rounded-lg">
+                          <p className="text-[9px] text-[#404060] uppercase tracking-wide mb-1">업계</p>
+                          <p className="text-[11px] text-[#9a9cb8]">{userProfile.industry}</p>
+                        </div>
+                      )}
+                      {userProfile.communication && (
+                        <div className="p-2.5 bg-[#09090c] border border-[#1a1c28] rounded-lg">
+                          <p className="text-[9px] text-[#404060] uppercase tracking-wide mb-1">소통 방식</p>
+                          <p className="text-[11px] text-[#9a9cb8]">{userProfile.communication}</p>
+                        </div>
+                      )}
+                    </div>
+                    {Array.isArray(userProfile.domain_keywords) && userProfile.domain_keywords.length > 0 && (
+                      <div className="p-2.5 bg-[#09090c] border border-[#1a1c28] rounded-lg">
+                        <p className="text-[9px] text-[#404060] uppercase tracking-wide mb-1.5">전문 키워드</p>
+                        <div className="flex flex-wrap gap-1">
+                          {userProfile.domain_keywords.map(k => (
+                            <span key={k} className="text-[10px] text-[#6366f1] bg-[#6366f1]/10 border border-[#6366f1]/20 px-1.5 py-0.5 rounded">{k}</span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {Array.isArray(userProfile.projects) && userProfile.projects.length > 0 && (
+                      <div className="p-2.5 bg-[#09090c] border border-[#1a1c28] rounded-lg">
+                        <p className="text-[9px] text-[#404060] uppercase tracking-wide mb-1.5">프로젝트</p>
+                        <div className="flex flex-wrap gap-1">
+                          {userProfile.projects.map(p => (
+                            <span key={p} className="text-[10px] text-[#9a9cb8] bg-[#1c1e2c] px-1.5 py-0.5 rounded">{p}</span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {Array.isArray(userProfile.teammates) && userProfile.teammates.length > 0 && (
+                      <div className="p-2.5 bg-[#09090c] border border-[#1a1c28] rounded-lg">
+                        <p className="text-[9px] text-[#404060] uppercase tracking-wide mb-1.5">팀원</p>
+                        <div className="flex flex-wrap gap-1">
+                          {userProfile.teammates.map(t => (
+                            <span key={t} className="text-[10px] text-[#c8c8d8] bg-[#1c1e2c] px-1.5 py-0.5 rounded">{t}</span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    <button
+                      onClick={async () => {
+                        if (!window.confirm('온보딩을 다시 실행하면 현재 프로필이 초기화됩니다. 계속할까요?')) return
+                        await window.tidy?.onboarding.reset()
+                        window.location.reload()
+                      }}
+                      className="text-[10px] text-[#404060] hover:text-[#6b6e8c] transition-colors"
+                    >
+                      온보딩 다시 실행 →
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div className="pt-4 border-t border-[#2a2a2a] space-y-3">
