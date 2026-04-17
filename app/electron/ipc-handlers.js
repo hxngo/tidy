@@ -219,6 +219,7 @@ function getContextCached() {
     projects: vault.getProjects(),
     workTypes: store.get('workTypes') || [],
     existingFolders: vault.getExistingFolderNames(scanPaths),
+    userProfile: vault.getUserProfile() || null,
   }
   _ctxCacheAt = now
   return _ctxCache
@@ -298,9 +299,9 @@ async function processIncomingMessage(rawText, source, win, opts = {}) {
   const now = new Date().toISOString()
 
   // 1. 기존 vault 컨텍스트 수집 (캐시 사용, 30초 TTL)
-  const { people: existingPeople, projects: existingProjects, workTypes, existingFolders } = getContextCached()
+  const { people: existingPeople, projects: existingProjects, workTypes, existingFolders, userProfile } = getContextCached()
 
-  console.log(`[Agent] 컨텍스트 로드: 인물 ${existingPeople.length}명, 프로젝트 ${existingProjects.length}개, 기존폴더 ${existingFolders.length}개`)
+  console.log(`[Agent] 컨텍스트 로드: 인물 ${existingPeople.length}명, 프로젝트 ${existingProjects.length}개, 기존폴더 ${existingFolders.length}개${userProfile ? ', 프로필 있음' : ''}`)
 
   // 2. AI 분석 — 기존 노드 컨텍스트 포함 (preAnalyzed가 있으면 재사용)
   let analysis = null
@@ -315,6 +316,7 @@ async function processIncomingMessage(rawText, source, win, opts = {}) {
         projects: existingProjects,
         workTypes,
         existingFolders,
+        userProfile,
       })
     }
   } catch (error) {
