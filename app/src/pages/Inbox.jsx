@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import InboxCard, { CATEGORY_DESC } from '../components/InboxCard.jsx'
 import { SourceIcon } from '../components/Icons.jsx'
+import { setCustomSkillsCache } from '../components/SkillPanel.jsx'
 
 // 기본 소스 카테고리 (삭제 불가, label/icon은 설정에서 수정 가능)
 const BUILTIN_SOURCES = [
@@ -140,6 +141,8 @@ export default function Inbox({ highlightItemId, onHighlightConsumed }) {
   const [trashLoading, setTrashLoading] = useState(false)
   const [emptyTrashConfirm, setEmptyTrashConfirm] = useState(false)
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
+  // 커스텀 스킬 (InboxCard quick skill 버튼에 노출)
+  const [customSkills, setCustomSkills] = useState([])
   // 커스텀/자동감지 소스 카테고리 (BUILTIN과 병합해서 사용)
   const [customSources, setCustomSources] = useState([])
 
@@ -195,6 +198,10 @@ export default function Inbox({ highlightItemId, onHighlightConsumed }) {
 
   useEffect(() => {
     loadSources().then(() => loadItems())
+    // 커스텀 스킬 로드 (InboxCard quick 버튼용)
+    window.tidy?.skills.listCustom?.().then(list => {
+      if (Array.isArray(list)) { setCustomSkills(list); setCustomSkillsCache(list) }
+    }).catch(() => {})
 
     const unsub = window.tidy?.inbox.onNewItem((newItem) => {
       const item = {
@@ -694,6 +701,7 @@ export default function Inbox({ highlightItemId, onHighlightConsumed }) {
                 onRestore={handleRestore}
                 onDelete={handleDelete}
                 onClick={() => openModal(item)}
+                customSkills={customSkills}
               />
             ))}
 
@@ -734,6 +742,7 @@ export default function Inbox({ highlightItemId, onHighlightConsumed }) {
                           setModalItem(item)
                           setReplyState({ loading: false, draft: null, copied: false })
                         }}
+                        customSkills={customSkills}
                       />
                     ))}
                   </div>

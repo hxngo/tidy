@@ -1,5 +1,6 @@
 import { useState, useEffect, createContext, useContext } from 'react'
 import { HashRouter, Routes, Route, useNavigate } from 'react-router-dom'
+import { setCustomSkillsCache } from './components/SkillPanel.jsx'
 
 export const ThemeContext = createContext({ theme: 'auto', setTheme: () => {} })
 export const FontSizeContext = createContext({ fontSize: 1, setFontSize: () => {} })
@@ -179,6 +180,14 @@ export default function App() {
     window.tidy?.onboarding.get()
       .then((r) => setOnboardingDone(r?.done === true))
       .catch(() => setOnboardingDone(true))
+  }, [])
+
+  // 커스텀 스킬 전역 캐시 초기 로드 — 앱 시작 시 한 번 로드해
+  // Inbox / People 등 모든 페이지에서 SkillPanel이 custom skill을 찾을 수 있게 함
+  useEffect(() => {
+    window.tidy?.skills.listCustom?.()
+      .then(list => { if (Array.isArray(list)) setCustomSkillsCache(list) })
+      .catch(() => {})
   }, [])
 
   if (onboardingDone === null) {

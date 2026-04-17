@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import SkillPanel from './SkillPanel.jsx'
+import SkillPanel, { AI_SKILLS } from './SkillPanel.jsx'
 
 // 인박스 카드 퀵 스킬 (가장 자주 쓰는 4개)
 const QUICK_SKILLS = [
@@ -134,7 +134,7 @@ function canReply(source = '') {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function InboxCard({ item, sourceConfig, onMarkDone, onRestore, onDelete, onClick }) {
+export default function InboxCard({ item, sourceConfig, onMarkDone, onRestore, onDelete, onClick, customSkills = [] }) {
   const [checkedItems, setCheckedItems] = useState({})
   const [actionsExpanded, setActionsExpanded] = useState(false)
   const [skillPanel, setSkillPanel] = useState({ open: false, skillId: null })
@@ -315,7 +315,7 @@ export default function InboxCard({ item, sourceConfig, onMarkDone, onRestore, o
 
         {/* ── Quick skill buttons ── */}
         {!isDone && (
-          <div className={`flex items-center gap-1 mb-2 transition-opacity duration-150 opacity-0 group-hover:opacity-100`}>
+          <div className={`flex items-center gap-1 mb-2 flex-wrap transition-opacity duration-150 opacity-0 group-hover:opacity-100`}>
             {QUICK_SKILLS.map(skill => (
               <button
                 key={skill.id}
@@ -326,6 +326,21 @@ export default function InboxCard({ item, sourceConfig, onMarkDone, onRestore, o
                 className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md border border-[#1c1e2c] hover:border-[#2a2c40] transition-colors"
                 style={{ color: skill.color, background: skill.color + '12' }}
               >
+                {skill.label}
+              </button>
+            ))}
+            {customSkills.slice(0, 3).map(skill => (
+              <button
+                key={skill.id}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setSkillPanel({ open: true, skillId: skill.id })
+                }}
+                className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md border transition-colors"
+                style={{ color: skill.color || '#c026d3', background: (skill.color || '#c026d3') + '12', borderColor: (skill.color || '#c026d3') + '30' }}
+                title={skill.desc || skill.label}
+              >
+                <span className="text-[9px]">{skill.icon || '★'}</span>
                 {skill.label}
               </button>
             ))}
