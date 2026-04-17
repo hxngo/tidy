@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
-import { MarkdownOutput } from './SkillPanel'
+import SkillPanel, { MarkdownOutput } from './SkillPanel'
 
 function Tooltip({ label, shortcut, children }) {
   const [visible, setVisible] = useState(false)
@@ -119,6 +119,7 @@ export default function TopBar({ syncStatus = {}, newCount = 0, onNavigateToItem
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState(null)
   const [searchLoading, setSearchLoading] = useState(false)
+  const [customSkillsForSearch, setCustomSkillsForSearch] = useState([])
   const searchInputRef = useRef(null)
   const searchTimerRef = useRef(null)
   const navigate = useNavigate()
@@ -132,6 +133,10 @@ export default function TopBar({ syncStatus = {}, newCount = 0, onNavigateToItem
   useEffect(() => {
     if (searchOpen) {
       setTimeout(() => searchInputRef.current?.focus(), 50)
+      // 검색창 열릴 때 커스텀 스킬 로드
+      window.tidy?.skills.listCustom?.().then(list => {
+        if (Array.isArray(list)) setCustomSkillsForSearch(list)
+      }).catch(() => {})
     } else {
       setSearchQuery('')
       setSearchResults(null)
@@ -175,9 +180,20 @@ export default function TopBar({ syncStatus = {}, newCount = 0, onNavigateToItem
     }
   }
 
-  const hasResults = searchResults && (
+  // 검색어에 맞는 커스텀 스킬 필터링 (클라이언트 측)
+  const matchedSkills = searchQuery
+    ? customSkillsForSearch.filter(s =>
+        s.label?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        s.desc?.toLowerCase().includes(searchQuery.toLowerCase())
+      ).slice(0, 3)
+    : []
+
+  const hasResults = (searchResults && (
     searchResults.items?.length > 0 || searchResults.tasks?.length > 0 || searchResults.people?.length > 0
-  )
+  )) || matchedSkills.length > 0
+
+  // 스킬 실행 패널 (검색에서)
+  const [searchSkillPanel, setSearchSkillPanel] = useState({ open: false, skillId: null })
 
   return (
     <>
@@ -397,9 +413,33 @@ export default function TopBar({ syncStatus = {}, newCount = 0, onNavigateToItem
                 </>
               )}
 
+              {/* 커스텀 스킬 결과 */}
+              {!searchLoading && matchedSkills.length > 0 && (
+                <div className="mb-2">
+                  <p className="text-[10px] text-[#505272] font-semibold uppercase tracking-widest px-4 py-1.5">스킬</p>
+                  {matchedSkills.map(skill => (
+                    <button
+                      key={skill.id}
+                      onClick={() => { setSearchOpen(false); setSearchSkillPanel({ open: true, skillId: skill.id }) }}
+                      className="w-full text-left px-4 py-2 hover:bg-[#14151e] transition-colors flex items-center gap-2.5"
+                    >
+                      <span className="w-6 h-6 rounded-md flex items-center justify-center text-[11px] flex-shrink-0"
+                        style={{ background: (skill.color || '#c026d3') + '20', color: skill.color || '#c026d3' }}>
+                        {skill.icon || '★'}
+                      </span>
+                      <div>
+                        <p className="text-[12px] text-[#c8c8d8]">{skill.label}</p>
+                        {skill.desc && <p className="text-[10px] text-[#505272] mt-0.5">{skill.desc}</p>}
+                      </div>
+                      <span className="ml-auto text-[9px] text-[#303050] bg-[#c026d3]/10 border border-[#c026d3]/20 px-1.5 py-0.5 rounded">커스텀</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
               {!searchQuery && (
                 <div className="text-center py-6">
-                  <p className="text-[12px] text-[#3a3c58]">인박스, 태스크, 인물을 통합 검색합니다</p>
+                  <p className="text-[12px] text-[#3a3c58]">인박스, 태스크, 인물, 스킬을 통합 검색합니다</p>
                   <p className="text-[11px] text-[#2a2c40] mt-1">⌘F로 언제든 열기</p>
                 </div>
               )}
@@ -416,6 +456,15 @@ export default function TopBar({ syncStatus = {}, newCount = 0, onNavigateToItem
           onRefresh={handleWeeklyReport}
         />
       )}
+
+      {/* 검색에서 스킬 실행 패널 */}
+      <SkillPanel
+        open={searchSkillPanel.open}
+        onClose={() => setSearchSkillPanel({ open: false, skillId: null })}
+        skillId={searchSkillPanel.skillId}
+        input=""
+        sourceItemId={null}
+      />
     </>
   )
 }
