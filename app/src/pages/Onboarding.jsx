@@ -5,7 +5,10 @@ import {
   IconKakao, IconIMessage, IconTelegram, IconLine,
 } from '../components/Icons.jsx'
 
-const TOTAL_STEPS = 5
+const TOTAL_STEPS = 6
+
+// 흔한 부서 목록 (빠른 선택용)
+const DEPT_PRESETS = ['개발팀', '마케팅팀', '영업팀', '디자인팀', '인사팀', '재무팀', '기획팀', '운영팀', '고객지원팀']
 
 export default function Onboarding({ onComplete }) {
   const [step, setStep] = useState(1)
@@ -17,21 +20,27 @@ export default function Onboarding({ onComplete }) {
   const [isMac, setIsMac] = useState(false)
   const [requestingFda, setRequestingFda] = useState(false)
 
-  // ── Step 3: user_question_generator ──────────────────────────
+  // ── Step 3: 조직 설정 ──────────────────────────────────────────
+  const [orgCompany, setOrgCompany] = useState('')
+  const [orgDept, setOrgDept]       = useState('')
+  const [orgSharedPath, setOrgSharedPath] = useState('')
+  const [orgPickingFolder, setOrgPickingFolder] = useState(false)
+
+  // ── Step 4: user_question_generator ──────────────────────────
   const [chatHistory, setChatHistory] = useState([])   // { role, content }
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
   const [questionsDone, setQuestionsDone] = useState(false)
   const chatEndRef = useRef(null)
 
-  // ── Step 4: Cold Start 확인 ───────────────────────────────────
+  // ── Step 5: Cold Start 확인 ───────────────────────────────────
   const [analyzedProfile, setAnalyzedProfile] = useState(null)
   const [analyzing, setAnalyzing] = useState(false)
   const [profileConfirmed, setProfileConfirmed] = useState(false)
 
-  // FDA 권한 확인 (Step 5)
+  // FDA 권한 확인 (Step 6)
   useEffect(() => {
-    if (step === 5) {
+    if (step === 6) {
       window.tidy?.permissions.check().then((res) => {
         setIsMac(res?.platform === 'darwin')
         setFdaStatus(res?.hasAccess ?? true)
@@ -39,9 +48,9 @@ export default function Onboarding({ onComplete }) {
     }
   }, [step])
 
-  // Step 3 진입 시 첫 질문 자동 생성
+  // Step 4 진입 시 첫 질문 자동 생성
   useEffect(() => {
-    if (step === 3 && chatHistory.length === 0) {
+    if (step === 4 && chatHistory.length === 0) {
       loadNextQuestion([])
     }
   }, [step])
@@ -82,14 +91,38 @@ export default function Onboarding({ onComplete }) {
     await loadNextQuestion(newHistory)
   }
 
-  // Step 4: 대화 기반 프로필 분석
+  // Step 3: 조직 설정 저장 후 다음으로
+  async function handleSaveOrg() {
+    await window.tidy?.org.setConfig({
+      company: orgCompany.trim(),
+      department: orgDept.trim(),
+      sharedVaultPath: orgSharedPath.trim(),
+    })
+    if (orgSharedPath.trim()) {
+      await window.tidy?.org.initSharedVault(orgSharedPath.trim())
+    }
+    setStep(4)
+  }
+
+  // Step 3: 공유 폴더 선택
+  async function handlePickOrgFolder() {
+    setOrgPickingFolder(true)
+    try {
+      const folderPath = await window.tidy?.org.pickFolder()
+      if (folderPath) setOrgSharedPath(folderPath)
+    } finally {
+      setOrgPickingFolder(false)
+    }
+  }
+
+  // Step 5: 대화 기반 프로필 분석
   async function handleAnalyze() {
     setAnalyzing(true)
     try {
       const res = await window.tidy?.profile.analyze({ history: chatHistory })
       if (res?.profile) {
         setAnalyzedProfile(res.profile)
-        setStep(4)
+        setStep(5)
       }
     } catch (e) {
       setError('프로필 분석 중 오류: ' + e.message)
@@ -98,7 +131,7 @@ export default function Onboarding({ onComplete }) {
     }
   }
 
-  // Step 4: 프로필 확인 후 저장
+  // Step 5: 프로필 확인 후 저장
   async function handleConfirmProfile() {
     if (!analyzedProfile) return
     await window.tidy?.profile.save(analyzedProfile)
@@ -107,7 +140,7 @@ export default function Onboarding({ onComplete }) {
       if (name) await window.tidy?.people.upsert({ name })
     }
     setProfileConfirmed(true)
-    setStep(5)
+    setStep(6)
   }
 
   async function handleComplete() {
@@ -166,8 +199,8 @@ export default function Onboarding({ onComplete }) {
           ))}
         </div>
 
-        <div className={`bg-[#161616] border border-[#2a2a2a] rounded-2xl ${step === 3 ? 'p-0 overflow-hidden' : 'p-8'}`}>
-          <p className={`text-xs text-[#404040] mb-6 text-center ${step === 3 ? 'pt-6' : ''}`}>
+        <div className={`bg-[#161616] border border-[#2a2a2a] rounded-2xl ${step === 4 ? 'p-0 overflow-hidden' : 'p-8'}`}>
+          <p className={`text-xs text-[#404040] mb-6 text-center ${step === 4 ? 'pt-6' : ''}`}>
             {step} / {TOTAL_STEPS}
           </p>
 
@@ -230,8 +263,104 @@ export default function Onboarding({ onComplete }) {
             </div>
           )}
 
-          {/* ─── Step 3: user_question_generator ────────────── */}
+          {/* ─── Step 3: 조직 설정 ──────────────────────────── */}
           {step === 3 && (
+            <div>
+              <div className="w-12 h-12 rounded-xl bg-[#1a1c2e] flex items-center justify-center mx-auto mb-5">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" className="text-[#818cf8]">
+                  <path d="M3 21h18M3 7v1m0 4v1m0 4v1M21 7v1m0 4v1m0 4v1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                  <rect x="9" y="13" width="6" height="8" rx="1" stroke="currentColor" strokeWidth="1.5"/>
+                  <rect x="2" y="3" width="20" height="6" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
+                </svg>
+              </div>
+              <h2 className="text-xl font-bold text-[#e5e5e5] mb-1 text-center">조직 정보 설정</h2>
+              <p className="text-sm text-[#737373] mb-6 text-center">
+                전사 공지, 부서 공유 자료를 자동으로 받아볼 수 있습니다
+              </p>
+
+              <div className="space-y-4">
+                {/* 회사명 */}
+                <div>
+                  <label className="block text-xs text-[#737373] mb-1.5">회사 / 조직명</label>
+                  <input
+                    type="text"
+                    value={orgCompany}
+                    onChange={e => setOrgCompany(e.target.value)}
+                    placeholder="예: 주식회사 티디"
+                    className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2.5 text-sm text-[#e5e5e5] placeholder-[#404040] focus:outline-none focus:border-[#4a4c68] transition-colors"
+                  />
+                </div>
+
+                {/* 부서 */}
+                <div>
+                  <label className="block text-xs text-[#737373] mb-1.5">소속 부서</label>
+                  <input
+                    type="text"
+                    value={orgDept}
+                    onChange={e => setOrgDept(e.target.value)}
+                    placeholder="예: 개발팀"
+                    className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2.5 text-sm text-[#e5e5e5] placeholder-[#404040] focus:outline-none focus:border-[#4a4c68] transition-colors"
+                  />
+                  {/* 빠른 선택 칩 */}
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {DEPT_PRESETS.map(d => (
+                      <button
+                        key={d}
+                        onClick={() => setOrgDept(d)}
+                        className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors ${
+                          orgDept === d
+                            ? 'bg-[#818cf8]/20 border-[#818cf8]/50 text-[#818cf8]'
+                            : 'bg-[#1a1a1a] border-[#2a2a2a] text-[#555] hover:text-[#737373] hover:border-[#3a3a3a]'
+                        }`}
+                      >{d}</button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 공유 폴더 (선택) */}
+                <div>
+                  <label className="block text-xs text-[#737373] mb-1">
+                    회사 공유 폴더 <span className="text-[#404040]">(선택 · Dropbox/NAS 등)</span>
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={orgSharedPath}
+                      onChange={e => setOrgSharedPath(e.target.value)}
+                      placeholder="/Volumes/Company 또는 ~/Dropbox/Company"
+                      className="flex-1 bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-xs text-[#e5e5e5] placeholder-[#404040] focus:outline-none focus:border-[#4a4c68] transition-colors font-mono"
+                    />
+                    <button
+                      onClick={handlePickOrgFolder}
+                      disabled={orgPickingFolder}
+                      className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-xs text-[#737373] rounded-lg hover:text-[#e5e5e5] hover:border-[#3a3a3a] disabled:opacity-40 transition-colors whitespace-nowrap"
+                    >
+                      {orgPickingFolder ? '…' : '폴더 선택'}
+                    </button>
+                  </div>
+                  {orgSharedPath && (
+                    <p className="text-[10px] text-[#555] mt-1.5">
+                      선택 시 company/inbox, departments/{'{부서명}'}/inbox 폴더가 자동 생성됩니다
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex gap-3 mt-7">
+                <button onClick={() => setStep(2)} className="flex-1 py-2.5 bg-[#1a1a1a] border border-[#2a2a2a] text-[#737373] text-sm rounded-xl hover:text-[#e5e5e5] transition-colors">이전</button>
+                <button
+                  onClick={handleSaveOrg}
+                  className="flex-[2] py-2.5 bg-[#d4d4d8] text-[#111] text-sm font-medium rounded-xl hover:bg-[#b8b8c0] transition-colors"
+                >
+                  다음
+                </button>
+              </div>
+              <button onClick={() => setStep(4)} className="w-full mt-2 text-xs text-[#404040] hover:text-[#737373] transition-colors py-1">나중에 설정하기</button>
+            </div>
+          )}
+
+          {/* ─── Step 4: user_question_generator ────────────── */}
+          {step === 4 && (
             <div className="flex flex-col h-[480px]">
               <div className="px-6 pb-3 border-b border-[#222]">
                 <h2 className="text-base font-semibold text-[#e5e5e5]">업무 파악</h2>
@@ -294,7 +423,7 @@ export default function Onboarding({ onComplete }) {
                   </form>
                 ) : (
                   <div className="flex gap-2">
-                    <button onClick={() => setStep(2)} className="flex-1 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#737373] text-sm rounded-xl hover:text-[#e5e5e5] transition-colors">이전</button>
+                    <button onClick={() => setStep(3)} className="flex-1 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#737373] text-sm rounded-xl hover:text-[#e5e5e5] transition-colors">이전</button>
                     <button
                       onClick={handleAnalyze}
                       disabled={analyzing}
@@ -308,8 +437,8 @@ export default function Onboarding({ onComplete }) {
             </div>
           )}
 
-          {/* ─── Step 4: Cold Start 확인 루프 ───────────────── */}
-          {step === 4 && analyzedProfile && (
+          {/* ─── Step 5: Cold Start 확인 루프 ───────────────── */}
+          {step === 5 && analyzedProfile && (
             <div>
               <h2 className="text-xl font-bold text-[#e5e5e5] mb-1">분석 결과 확인</h2>
               <p className="text-sm text-[#737373] mb-5">AI가 파악한 내용이 맞나요?</p>
@@ -336,7 +465,7 @@ export default function Onboarding({ onComplete }) {
 
               <div className="flex gap-3">
                 <button
-                  onClick={() => { setStep(3); setQuestionsDone(false) }}
+                  onClick={() => { setStep(4); setQuestionsDone(false) }}
                   className="flex-1 py-2.5 bg-[#1a1a1a] border border-[#2a2a2a] text-[#737373] text-sm rounded-xl hover:text-[#e5e5e5] transition-colors"
                 >
                   다시 입력
@@ -351,8 +480,8 @@ export default function Onboarding({ onComplete }) {
             </div>
           )}
 
-          {/* ─── Step 5: 알림 권한 ──────────────────────────── */}
-          {step === 5 && (
+          {/* ─── Step 6: 알림 권한 ──────────────────────────── */}
+          {step === 6 && (
             <div>
               <h2 className="text-xl font-bold text-[#e5e5e5] mb-2">알림 자동 감지</h2>
               <p className="text-sm text-[#737373] mb-6">
@@ -410,7 +539,7 @@ export default function Onboarding({ onComplete }) {
               )}
 
               <div className="flex gap-3 mt-8">
-                <button onClick={() => setStep(4)} className="flex-1 py-2.5 bg-[#1a1a1a] border border-[#2a2a2a] text-[#737373] text-sm rounded-xl hover:text-[#e5e5e5] transition-colors">이전</button>
+                <button onClick={() => setStep(5)} className="flex-1 py-2.5 bg-[#1a1a1a] border border-[#2a2a2a] text-[#737373] text-sm rounded-xl hover:text-[#e5e5e5] transition-colors">이전</button>
                 <button onClick={handleComplete} disabled={isSubmitting} className="flex-1 py-2.5 bg-[#d4d4d8] text-[#111] text-sm rounded-xl hover:bg-[#b8b8c0] disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
                   {isSubmitting ? '저장 중...' : fdaStatus ? '완료' : '나중에 설정'}
                 </button>

@@ -151,15 +151,22 @@ export default function TaskItem({ task, onStatusChange, onUpdate, selected, onS
             className="text-[13px] bg-transparent border-b border-[#252840] focus:border-[#6a6c98] focus:outline-none text-[#d8d8e8] w-full leading-snug"
           />
         ) : (
-          <div className="flex items-center gap-1.5 group/title">
+          <div className="flex items-center gap-1.5 group/title flex-wrap">
+            {/* Scope badge */}
+            {task.scope === 'company' && (
+              <span className="text-[9px] font-medium px-1.5 py-0.5 rounded border text-indigo-300 bg-indigo-500/10 border-indigo-500/30 flex-shrink-0">🏢 전사</span>
+            )}
+            {task.scope === 'department' && (
+              <span className="text-[9px] font-medium px-1.5 py-0.5 rounded border text-teal-300 bg-teal-500/10 border-teal-500/30 flex-shrink-0">👥 부서</span>
+            )}
             <p
-              className={`text-[13px] leading-snug ${isDone || isTrashed ? 'line-through text-[#4a4c68]' : 'text-[#d8d8e8]'} ${selectable ? 'cursor-text' : ''}`}
-              onDoubleClick={() => { if (selectable) { setEditTitle(task.title || ''); setEditingField('title') } }}
-              title={selectable ? '더블클릭으로 제목 편집' : undefined}
+              className={`text-[13px] leading-snug ${isDone || isTrashed ? 'line-through text-[#4a4c68]' : 'text-[#d8d8e8]'} ${selectable && !task._readonly ? 'cursor-text' : ''}`}
+              onDoubleClick={() => { if (selectable && !task._readonly) { setEditTitle(task.title || ''); setEditingField('title') } }}
+              title={selectable && !task._readonly ? '더블클릭으로 제목 편집' : undefined}
             >
               {task.title}
             </p>
-            {selectable && (
+            {selectable && !task._readonly && (
               <span className="opacity-0 group-hover/title:opacity-40 text-[#6b6e8c] transition-opacity flex-shrink-0">
                 {IcPencil}
               </span>

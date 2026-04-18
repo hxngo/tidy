@@ -563,7 +563,11 @@ function setupIpcHandlers(ipcMain, getWindow) {
 
   ipcMain.handle('inbox:get', async (_event, { limit = 50, offset = 0 } = {}) => {
     try {
-      return vault.getItems({ limit, offset })
+      const personal = vault.getItems({ limit, offset })
+      const shared   = vault.getSharedItems()
+      // 공유 아이템(전사·부서)을 앞에 배치, 개인 아이템 뒤에
+      const all = [...shared, ...(Array.isArray(personal) ? personal : [])]
+      return all.slice(0, limit + shared.length)
     } catch (error) {
       return { error: error.message }
     }
@@ -655,7 +659,9 @@ function setupIpcHandlers(ipcMain, getWindow) {
 
   ipcMain.handle('tasks:get', async (_event, { status } = {}) => {
     try {
-      return vault.getTasks({ status })
+      const personal = vault.getTasks({ status })
+      const shared   = vault.getSharedTasks().filter(t => !status || t.status === status)
+      return [...shared, ...(Array.isArray(personal) ? personal : [])]
     } catch (error) {
       return { error: error.message }
     }
@@ -842,6 +848,25 @@ function setupIpcHandlers(ipcMain, getWindow) {
   ipcMain.handle('onboarding:reset', () => {
     store.set('onboardingDone', false)
     return { success: true }
+  })
+
+  // ─── Org Config (회사/부서/공유 볼트) ────────────────────────────
+  ipcMain.handle('org:get-config', () => vault.getOrgConfig())
+
+  ipcMain.handle('org:set-config', (_event, config) => vault.setOrgConfig(config))
+
+  ipcMain.handle('org:init-shared-vault', (_event, vaultPath) => {
+    const ok = vault.initSharedVault(vaultPath)
+    return { success: ok }
+  })
+
+  ipcMain.handle('org:pick-folder', async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+      properties: ['openDirectory'],
+      title: '회사 공유 폴더 선택',
+      buttonLabel: '선택',
+    })
+    return canceled ? null : filePaths[0]
   })
 
   // ─── User Profile (Cold Start) ────────────────────────────────

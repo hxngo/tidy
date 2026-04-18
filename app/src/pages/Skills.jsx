@@ -383,6 +383,8 @@ function CreateSkillModal({ skill, onClose, onSaved, onDeleted }) {
   const [desc, setDesc]       = useState(skill?.desc  || '')
   const [detail, setDetail]   = useState(skill?.detail || '')
   const [systemPrompt, setSystemPrompt] = useState(skill?.systemPrompt || '')
+  const [examples, setExamples] = useState(Array.isArray(skill?.examples) ? skill.examples.join('\n') : '')
+  const [tip, setTip]         = useState(skill?.tip || '')
   const [saving, setSaving]   = useState(false)
   const [confirmDel, setConfirmDel] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -397,17 +399,28 @@ function CreateSkillModal({ skill, onClose, onSaved, onDeleted }) {
         const s = res.skill
         setLabel(s.label || ''); setIcon(s.icon || '★'); setColor(s.color || '#6366f1')
         setDesc(s.desc || ''); setDetail(s.detail || ''); setSystemPrompt(s.systemPrompt || '')
+        setExamples(Array.isArray(s.examples) ? s.examples.join('\n') : '')
+        setTip(s.tip || '')
         setTab('manual')
       } else { setGenError(res?.error || '생성 실패') }
     } catch (e) { setGenError(e.message) }
     finally { setGenerating(false) }
   }
 
+  function getExamplesArray() {
+    return examples.split('\n').map(s => s.trim()).filter(Boolean)
+  }
+
   async function handleSave() {
     if (!label.trim() || !systemPrompt.trim()) return
     setSaving(true)
     try {
-      await window.tidy?.skills.saveCustom({ id: skill?.id || null, label: label.trim(), icon, color, desc: desc.trim(), detail: detail.trim(), systemPrompt: systemPrompt.trim(), type: 'custom', source: 'user' })
+      await window.tidy?.skills.saveCustom({
+        id: skill?.id || null, label: label.trim(), icon, color,
+        desc: desc.trim(), detail: detail.trim(), systemPrompt: systemPrompt.trim(),
+        examples: getExamplesArray(), tip: tip.trim(),
+        type: 'custom', source: 'user',
+      })
       onSaved()
     } catch (e) { alert('저장 실패: ' + e.message) }
     finally { setSaving(false) }
@@ -421,7 +434,7 @@ function CreateSkillModal({ skill, onClose, onSaved, onDeleted }) {
     finally { setDeleting(false) }
   }
 
-  const savedSkillObj = { ...skill, label, icon, color, desc, detail, systemPrompt, type: 'custom' }
+  const savedSkillObj = { ...skill, label, icon, color, desc, detail, systemPrompt, examples: getExamplesArray(), tip, type: 'custom' }
 
   return (
     <>
@@ -519,6 +532,19 @@ function CreateSkillModal({ skill, onClose, onSaved, onDeleted }) {
                   rows={6}
                   className="w-full bg-[#09090c] border border-[#1a1c28] rounded-xl px-4 py-3 text-[12px] text-[#c8c8d8] placeholder-[#2a2c48] focus:outline-none focus:border-[#c026d3]/40 resize-none leading-relaxed font-mono" />
                 <p className="mt-1 text-[10px] text-[#303050]">이 내용이 Claude에게 전달됩니다</p>
+              </div>
+              <div>
+                <label className="text-[10px] font-semibold text-[#505272] uppercase tracking-widest mb-1.5 block">예시 입력 (선택 · 한 줄씩)</label>
+                <textarea value={examples} onChange={e => setExamples(e.target.value)}
+                  placeholder={'예시 1\n예시 2\n예시 3'}
+                  rows={3}
+                  className="w-full bg-[#09090c] border border-[#1a1c28] rounded-xl px-4 py-3 text-[12px] text-[#c8c8d8] placeholder-[#2a2c48] focus:outline-none focus:border-[#c026d3]/40 resize-none leading-relaxed" />
+                <p className="mt-1 text-[10px] text-[#303050]">스킬 소개 화면에 사용 예시로 표시됩니다</p>
+              </div>
+              <div>
+                <label className="text-[10px] font-semibold text-[#505272] uppercase tracking-widest mb-1.5 block">팁 (선택)</label>
+                <input value={tip} onChange={e => setTip(e.target.value)} placeholder="사용 팁 한 줄"
+                  className="w-full bg-[#09090c] border border-[#1a1c28] rounded-xl px-4 py-2 text-[12px] text-[#c8c8d8] placeholder-[#2a2c48] focus:outline-none focus:border-[#c026d3]/40" />
               </div>
             </div>
           )}

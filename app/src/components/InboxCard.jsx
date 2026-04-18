@@ -187,6 +187,18 @@ export default function InboxCard({ item, sourceConfig, onMarkDone, onRestore, o
             </span>
           </div>
 
+          {/* Scope badge (전사 / 부서) */}
+          {item.scope === 'company' && (
+            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded border text-indigo-300 bg-indigo-500/10 border-indigo-500/30 flex-shrink-0 flex items-center gap-0.5">
+              🏢 전사
+            </span>
+          )}
+          {item.scope === 'department' && (
+            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded border text-teal-300 bg-teal-500/10 border-teal-500/30 flex-shrink-0 flex items-center gap-0.5">
+              👥 부서
+            </span>
+          )}
+
           {/* Category badge + tooltip */}
           <span className="relative group/cat flex-shrink-0">
             <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded border cursor-default ${badgeStyle}`}>

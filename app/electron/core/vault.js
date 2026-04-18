@@ -1028,6 +1028,123 @@ function saveUserProfile(profile) {
   return updated
 }
 
+// ─── Org Config (회사/부서/공유 볼트) ────────────────────────────
+function getOrgConfig() {
+  return store.get('orgConfig') || { company: '', department: '', sharedVaultPath: '' }
+}
+
+function setOrgConfig(config) {
+  const existing = getOrgConfig()
+  const updated = { ...existing, ...config }
+  store.set('orgConfig', updated)
+  return updated
+}
+
+// 공유 볼트 폴더 구조 초기화 (어드민 또는 첫 설정 시)
+function initSharedVault(sharedVaultPath) {
+  if (!sharedVaultPath) return false
+  try {
+    const dirs = [
+      path.join(sharedVaultPath, 'company', 'inbox'),
+      path.join(sharedVaultPath, 'company', 'tasks'),
+      path.join(sharedVaultPath, 'company', 'calendar'),
+      path.join(sharedVaultPath, 'departments'),
+    ]
+    for (const dir of dirs) ensureDir(dir)
+    console.log('[Vault] 공유 볼트 초기화:', sharedVaultPath)
+    return true
+  } catch (e) {
+    console.error('[Vault] 공유 볼트 초기화 오류:', e.message)
+    return false
+  }
+}
+
+// 공유 폴더의 .md 파일을 인박스 아이템 형태로 읽기
+function _readSharedItemsFromDir(dir, scope) {
+  if (!fs.existsSync(dir)) return []
+  const results = []
+  for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.md'))) {
+    try {
+      const content = fs.readFileSync(path.join(dir, file), 'utf-8')
+      const { meta, body } = parseFrontmatter(content)
+      const summaryMatch = body.match(/## 요약\n([\s\S]*?)(?=\n\n## |\n## |$)/) ||
+                           body.match(/## Summary\n([\s\S]*?)(?=\n\n## |\n## |$)/)
+      const titleMatch = body.match(/^# (.+)$/m)
+      results.push({
+        id: meta.id || file.replace('.md', ''),
+        source: meta.source || scope,
+        category: meta.category || '정보',
+        people: (() => { try { return JSON.parse(meta.people || '[]') } catch { return [] } })(),
+        action_items: [],
+        project_id: null,
+        priority: meta.priority || 'medium',
+        status: meta.status || 'new',
+        received_at: meta.received_at || meta.created_at || null,
+        created_at: meta.received_at || meta.created_at || null,
+        summary: summaryMatch
+          ? summaryMatch[1].trim()
+          : (titleMatch ? titleMatch[1].trim() : file.replace('.md', '')),
+        raw_text: '',
+        scope,           // 'company' | 'department'
+        _readonly: true,
+        _filePath: path.join(dir, file),
+      })
+    } catch (e) {
+      console.error('[Vault] 공유 아이템 읽기 오류:', file, e.message)
+    }
+  }
+  return results
+}
+
+// 공유 볼트에서 인박스 아이템 병합 (전사 + 부서)
+function getSharedItems() {
+  const { sharedVaultPath, department } = getOrgConfig()
+  if (!sharedVaultPath) return []
+  const companyItems = _readSharedItemsFromDir(
+    path.join(sharedVaultPath, 'company', 'inbox'), 'company'
+  )
+  const deptItems = department
+    ? _readSharedItemsFromDir(path.join(sharedVaultPath, 'departments', department, 'inbox'), 'department')
+    : []
+  return [...companyItems, ...deptItems]
+}
+
+// 공유 볼트에서 태스크 읽기 (전사 + 부서)
+function getSharedTasks() {
+  const { sharedVaultPath, department } = getOrgConfig()
+  if (!sharedVaultPath) return []
+
+  const readTasksFromDir = (dir, scope) => {
+    if (!fs.existsSync(dir)) return []
+    return fs.readdirSync(dir).filter(f => f.endsWith('.md')).flatMap(f => {
+      try {
+        const content = fs.readFileSync(path.join(dir, f), 'utf-8')
+        const { meta, body } = parseFrontmatter(content)
+        const titleMatch = body.match(/^# (.+)$/m)
+        return [{
+          id: meta.id || f.replace('.md', ''),
+          title: titleMatch ? titleMatch[1].trim() : f.replace('.md', ''),
+          status: meta.status || 'active',
+          due_date: meta.due_date === 'null' || !meta.due_date ? null : meta.due_date,
+          person: meta.person || null,
+          memo: meta.memo || null,
+          created_at: meta.created_at || null,
+          updated_at: meta.updated_at || null,
+          scope,
+          _readonly: true,
+        }]
+      } catch { return [] }
+    })
+  }
+
+  return [
+    ...readTasksFromDir(path.join(sharedVaultPath, 'company', 'tasks'), 'company'),
+    ...(department
+      ? readTasksFromDir(path.join(sharedVaultPath, 'departments', department, 'tasks'), 'department')
+      : []),
+  ]
+}
+
 // ─── Custom Skills ───────────────────────────────────────────────
 function getCustomSkillsDir() {
   return path.join(getVaultPath(), 'Skills', 'Custom')
@@ -1163,6 +1280,11 @@ module.exports = {
   deleteSkillOutput,
   getUserProfile,
   saveUserProfile,
+  getOrgConfig,
+  setOrgConfig,
+  initSharedVault,
+  getSharedItems,
+  getSharedTasks,
   getCustomSkills,
   saveCustomSkill,
   deleteCustomSkill,

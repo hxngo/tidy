@@ -152,6 +152,14 @@ contextBridge.exposeInMainWorld('tidy', {
     setUrl:     (url)    => ipcRenderer.invoke('marketplace:set-url', { url }),
   },
 
+  // 조직 설정 (회사/부서/공유 볼트)
+  org: {
+    getConfig:        ()       => ipcRenderer.invoke('org:get-config'),
+    setConfig:        (config) => ipcRenderer.invoke('org:set-config', config),
+    initSharedVault:  (p)      => ipcRenderer.invoke('org:init-shared-vault', p),
+    pickFolder:       ()       => ipcRenderer.invoke('org:pick-folder'),
+  },
+
   // 개발용 테스트
   dev: {
     injectTest: (params) => ipcRenderer.invoke('dev:injectTest', params),

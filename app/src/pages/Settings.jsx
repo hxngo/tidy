@@ -79,6 +79,11 @@ export default function Settings({ embedded = false }) {
   const [marketTestStatus, setMarketTestStatus] = useState(null) // null|'ok'|'fail'
   const [marketTestMsg, setMarketTestMsg]   = useState('')
 
+  // 조직 설정 (org)
+  const [orgConfig, setOrgConfigState] = useState({ company: '', department: '', sharedVaultPath: '' })
+  const [orgSaving, setOrgSaving] = useState(false)
+  const [orgPickingFolder, setOrgPickingFolder] = useState(false)
+
   // 사용자 프로필 (Cold Start)
   const [userProfile, setUserProfile] = useState(null)
   const [profileLoaded, setProfileLoaded] = useState(false)
@@ -150,6 +155,10 @@ export default function Settings({ embedded = false }) {
         if (profile) { setUserProfile(profile); setProfileDraft(profile) }
         setProfileLoaded(true)
       } catch { setProfileLoaded(true) }
+      try {
+        const org = await window.tidy?.org.getConfig?.()
+        if (org) setOrgConfigState(org)
+      } catch {}
     }
     loadSettings()
 
@@ -350,6 +359,84 @@ export default function Settings({ embedded = false }) {
                     {saving ? '저장 중...' : '저장'}
                   </button>
                 </form>
+              </div>
+
+              {/* ── 조직 설정 ── */}
+              <div className="pt-4 border-t border-[#2a2a2a]">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h2 className="text-sm font-semibold text-[#e5e5e5]">조직 설정</h2>
+                    <p className="text-xs text-[#737373] mt-0.5">전사·부서 공유 데이터 수신 설정</p>
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[10px] text-[#737373] mb-1">회사명</label>
+                      <input
+                        value={orgConfig.company || ''}
+                        onChange={e => setOrgConfigState(p => ({ ...p, company: e.target.value }))}
+                        placeholder="주식회사 티디"
+                        className="w-full bg-[#141414] border border-[#2a2a2a] rounded-lg px-3 py-2 text-xs text-[#e5e5e5] placeholder-[#404040] focus:outline-none focus:border-white/30"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-[#737373] mb-1">소속 부서</label>
+                      <input
+                        value={orgConfig.department || ''}
+                        onChange={e => setOrgConfigState(p => ({ ...p, department: e.target.value }))}
+                        placeholder="개발팀"
+                        className="w-full bg-[#141414] border border-[#2a2a2a] rounded-lg px-3 py-2 text-xs text-[#e5e5e5] placeholder-[#404040] focus:outline-none focus:border-white/30"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-[#737373] mb-1">
+                      회사 공유 폴더 <span className="text-[#404040]">(Dropbox/NAS 등)</span>
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        value={orgConfig.sharedVaultPath || ''}
+                        onChange={e => setOrgConfigState(p => ({ ...p, sharedVaultPath: e.target.value }))}
+                        placeholder="/Volumes/Company 또는 ~/Dropbox/TidyCompany"
+                        className="flex-1 bg-[#141414] border border-[#2a2a2a] rounded-lg px-3 py-2 text-xs text-[#e5e5e5] placeholder-[#404040] focus:outline-none focus:border-white/30 font-mono"
+                      />
+                      <button
+                        onClick={async () => {
+                          setOrgPickingFolder(true)
+                          try {
+                            const p = await window.tidy?.org.pickFolder()
+                            if (p) setOrgConfigState(prev => ({ ...prev, sharedVaultPath: p }))
+                          } finally { setOrgPickingFolder(false) }
+                        }}
+                        disabled={orgPickingFolder}
+                        className="px-2.5 py-1.5 bg-[#1a1a1a] border border-[#2a2a2a] text-[10px] text-[#737373] rounded-lg hover:text-[#e5e5e5] disabled:opacity-40 transition-colors whitespace-nowrap"
+                      >
+                        {orgPickingFolder ? '…' : '선택'}
+                      </button>
+                    </div>
+                    {orgConfig.sharedVaultPath && (
+                      <p className="text-[10px] text-[#555] mt-1">
+                        구조: company/inbox · company/tasks · departments/{orgConfig.department || '{부서명}'}/inbox
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    onClick={async () => {
+                      setOrgSaving(true)
+                      try {
+                        await window.tidy?.org.setConfig(orgConfig)
+                        if (orgConfig.sharedVaultPath) await window.tidy?.org.initSharedVault(orgConfig.sharedVaultPath)
+                        showFeedback('success', '조직 설정이 저장됐습니다')
+                      } catch (e) { showFeedback('error', e.message) }
+                      finally { setOrgSaving(false) }
+                    }}
+                    disabled={orgSaving}
+                    className="w-full py-2 bg-[#1a1c28] border border-[#252840] text-[11px] text-[#818cf8] hover:bg-[#1e2035] hover:text-[#a5b4fc] rounded-lg transition-colors disabled:opacity-40"
+                  >
+                    {orgSaving ? '저장 중...' : '조직 설정 저장'}
+                  </button>
+                </div>
               </div>
 
               {/* ── 사용자 프로필 (Cold Start) ── */}
