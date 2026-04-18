@@ -1145,6 +1145,86 @@ function getSharedTasks() {
   ]
 }
 
+// ─── Org Shared Content (중앙 관리) ──────────────────────────────
+
+// 공유 볼트에 인박스 공지 생성
+function createSharedItem({ title, body = '', scope, department = '' }) {
+  const { sharedVaultPath } = getOrgConfig()
+  if (!sharedVaultPath) throw new Error('공유 볼트 경로가 설정되지 않았습니다')
+  const dir = scope === 'company'
+    ? path.join(sharedVaultPath, 'company', 'inbox')
+    : path.join(sharedVaultPath, 'departments', department || getOrgConfig().department, 'inbox')
+  ensureDir(dir)
+  const id = Date.now().toString()
+  const now = new Date().toISOString()
+  const content = `---\nid: ${id}\ntitle: ${title}\nscope: ${scope}\ncreated_at: ${now}\nstatus: new\n---\n\n# ${title}\n\n${body}`
+  fs.writeFileSync(path.join(dir, `${id}.md`), content, 'utf-8')
+  return { id, title, body, scope, created_at: now }
+}
+
+// 공유 볼트에 태스크 생성
+function createSharedTask({ title, due_date = null, person = null, scope, department = '' }) {
+  const { sharedVaultPath } = getOrgConfig()
+  if (!sharedVaultPath) throw new Error('공유 볼트 경로가 설정되지 않았습니다')
+  const dir = scope === 'company'
+    ? path.join(sharedVaultPath, 'company', 'tasks')
+    : path.join(sharedVaultPath, 'departments', department || getOrgConfig().department, 'tasks')
+  ensureDir(dir)
+  const id = Date.now().toString()
+  const now = new Date().toISOString()
+  const meta = [`id: ${id}`, `scope: ${scope}`, `status: active`, `created_at: ${now}`]
+  if (due_date) meta.push(`due_date: ${due_date}`)
+  if (person) meta.push(`person: ${person}`)
+  const content = `---\n${meta.join('\n')}\n---\n\n# ${title}\n`
+  fs.writeFileSync(path.join(dir, `${id}.md`), content, 'utf-8')
+  return { id, title, due_date, person, scope, status: 'active', created_at: now }
+}
+
+// 공유 파일 삭제 (경로 직접 전달)
+function deleteSharedFile(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) return false
+  fs.unlinkSync(filePath)
+  return true
+}
+
+// 관리자용: 특정 scope의 인박스 아이템 목록 (파일 경로 포함)
+function listSharedItemsAdmin(scope, department) {
+  const { sharedVaultPath } = getOrgConfig()
+  if (!sharedVaultPath) return []
+  const dir = scope === 'company'
+    ? path.join(sharedVaultPath, 'company', 'inbox')
+    : path.join(sharedVaultPath, 'departments', department || '', 'inbox')
+  return _readSharedItemsFromDir(dir, scope)
+}
+
+// 관리자용: 특정 scope의 태스크 목록 (파일 경로 포함)
+function listSharedTasksAdmin(scope, department) {
+  const { sharedVaultPath } = getOrgConfig()
+  if (!sharedVaultPath) return []
+  const dir = scope === 'company'
+    ? path.join(sharedVaultPath, 'company', 'tasks')
+    : path.join(sharedVaultPath, 'departments', department || '', 'tasks')
+  if (!fs.existsSync(dir)) return []
+  return fs.readdirSync(dir).filter(f => f.endsWith('.md')).flatMap(f => {
+    try {
+      const content = fs.readFileSync(path.join(dir, f), 'utf-8')
+      const { meta, body } = parseFrontmatter(content)
+      const titleMatch = body.match(/^# (.+)$/m)
+      return [{
+        id: meta.id || f.replace('.md', ''),
+        title: titleMatch ? titleMatch[1].trim() : f.replace('.md', ''),
+        status: meta.status || 'active',
+        due_date: meta.due_date || null,
+        person: meta.person || null,
+        scope,
+        created_at: meta.created_at || null,
+        _readonly: true,
+        _filePath: path.join(dir, f),
+      }]
+    } catch { return [] }
+  })
+}
+
 // ─── Custom Skills ───────────────────────────────────────────────
 function getCustomSkillsDir() {
   return path.join(getVaultPath(), 'Skills', 'Custom')
@@ -1285,6 +1365,11 @@ module.exports = {
   initSharedVault,
   getSharedItems,
   getSharedTasks,
+  createSharedItem,
+  createSharedTask,
+  deleteSharedFile,
+  listSharedItemsAdmin,
+  listSharedTasksAdmin,
   getCustomSkills,
   saveCustomSkill,
   deleteCustomSkill,

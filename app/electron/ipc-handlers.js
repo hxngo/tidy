@@ -869,6 +869,34 @@ function setupIpcHandlers(ipcMain, getWindow) {
     return canceled ? null : filePaths[0]
   })
 
+  // 중앙 관리: 공유 인박스 공지 목록
+  ipcMain.handle('org:list-items', (_event, { scope, department } = {}) => {
+    try { return vault.listSharedItemsAdmin(scope, department) } catch (e) { return [] }
+  })
+
+  // 중앙 관리: 공유 태스크 목록
+  ipcMain.handle('org:list-tasks', (_event, { scope, department } = {}) => {
+    try { return vault.listSharedTasksAdmin(scope, department) } catch (e) { return [] }
+  })
+
+  // 중앙 관리: 공유 인박스 공지 생성
+  ipcMain.handle('org:create-item', (_event, params) => {
+    try { return { success: true, item: vault.createSharedItem(params) } }
+    catch (e) { return { success: false, error: e.message } }
+  })
+
+  // 중앙 관리: 공유 태스크 생성
+  ipcMain.handle('org:create-task', (_event, params) => {
+    try { return { success: true, task: vault.createSharedTask(params) } }
+    catch (e) { return { success: false, error: e.message } }
+  })
+
+  // 중앙 관리: 공유 아이템/태스크 삭제 (파일 경로로)
+  ipcMain.handle('org:delete-file', (_event, { filePath }) => {
+    try { return { success: vault.deleteSharedFile(filePath) } }
+    catch (e) { return { success: false, error: e.message } }
+  })
+
   // ─── User Profile (Cold Start) ────────────────────────────────
 
   ipcMain.handle('profile:get', () => {

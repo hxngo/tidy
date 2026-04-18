@@ -154,10 +154,16 @@ contextBridge.exposeInMainWorld('tidy', {
 
   // 조직 설정 (회사/부서/공유 볼트)
   org: {
-    getConfig:        ()       => ipcRenderer.invoke('org:get-config'),
-    setConfig:        (config) => ipcRenderer.invoke('org:set-config', config),
-    initSharedVault:  (p)      => ipcRenderer.invoke('org:init-shared-vault', p),
-    pickFolder:       ()       => ipcRenderer.invoke('org:pick-folder'),
+    getConfig:        ()             => ipcRenderer.invoke('org:get-config'),
+    setConfig:        (config)       => ipcRenderer.invoke('org:set-config', config),
+    initSharedVault:  (p)            => ipcRenderer.invoke('org:init-shared-vault', p),
+    pickFolder:       ()             => ipcRenderer.invoke('org:pick-folder'),
+    // 중앙 관리
+    listItems:        (params)       => ipcRenderer.invoke('org:list-items', params),
+    listTasks:        (params)       => ipcRenderer.invoke('org:list-tasks', params),
+    createItem:       (params)       => ipcRenderer.invoke('org:create-item', params),
+    createTask:       (params)       => ipcRenderer.invoke('org:create-task', params),
+    deleteFile:       (filePath)     => ipcRenderer.invoke('org:delete-file', { filePath }),
   },
 
   // 개발용 테스트

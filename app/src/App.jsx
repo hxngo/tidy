@@ -65,6 +65,7 @@ import People from './pages/People.jsx'
 import Settings from './pages/Settings.jsx'
 import Calendar from './pages/Calendar.jsx'
 import Skills from './pages/Skills.jsx'
+import OrgAdmin from './pages/OrgAdmin.jsx'
 import FileDropZone from './components/FileDropZone.jsx'
 
 function MainLayout() {
@@ -151,6 +152,7 @@ function MainLayout() {
           <Route path="/people" element={<People />} />
           <Route path="/calendar" element={<Calendar />} />
           <Route path="/skills" element={<Skills />} />
+          <Route path="/org" element={<OrgAdmin />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </div>
