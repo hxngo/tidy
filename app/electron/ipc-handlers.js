@@ -2607,7 +2607,6 @@ ${text.slice(0, 8000)}`
       tableHeader: 5,
       noteBox: 6,
       separator: 7,
-      headingUnderline: 8,
     },
   }
 
@@ -3637,7 +3636,7 @@ ${text.slice(0, 8000)}`
       xml = bumpItemCnt(xml, 'hh:paraProperties', 5)
       xml = xml.replace('</hh:paraProperties>', [
         paraPrXml(HWPX_STYLE.para.title, 'CENTER', 0, 400),
-        paraPrXml(HWPX_STYLE.para.heading, 'LEFT', 900, 420, 0, 160, HWPX_STYLE.border.headingUnderline, 120),
+        paraPrXml(HWPX_STYLE.para.heading, 'LEFT', 900, 300),
         paraPrXml(HWPX_STYLE.para.body, 'LEFT', 120, 120),
         paraPrXml(HWPX_STYLE.para.right, 'RIGHT', 120, 120),
         paraPrXml(HWPX_STYLE.para.list, 'LEFT', 80, 80, 900),
@@ -3669,14 +3668,6 @@ ${text.slice(0, 8000)}`
         '</hh:borderFills>',
       ].join(''))
     }
-    if (!xml.includes(`<hh:borderFill id="${HWPX_STYLE.border.headingUnderline}"`)) {
-      xml = bumpItemCnt(xml, 'hh:borderFills', 1)
-      xml = xml.replace('</hh:borderFills>', [
-        headingUnderlineBorderFillXml(HWPX_STYLE.border.headingUnderline),
-        '</hh:borderFills>',
-      ].join(''))
-    }
-    xml = ensureHeadingParagraphUnderline(xml)
     return xml
   }
 
@@ -3685,25 +3676,12 @@ ${text.slice(0, 8000)}`
     return xml.replace(re, (_m, a, n, b) => `${a}${Number(n) + add}${b}`)
   }
 
-  function ensureHeadingParagraphUnderline(xml) {
-    const paraRe = new RegExp(`(<hh:paraPr\\b(?=[^>]*\\bid="${HWPX_STYLE.para.heading}"\\b)[\\s\\S]*?</hh:paraPr>)`)
-    return xml.replace(paraRe, paraXml => {
-      const borderTag = `<hh:border borderFillIDRef="${HWPX_STYLE.border.headingUnderline}" offsetLeft="0" offsetRight="0" offsetTop="0" offsetBottom="120" connect="0" ignoreMargin="0"/>`
-      if (!/<hh:border\b[^>]*\/>/.test(paraXml)) return paraXml.replace('</hh:paraPr>', `${borderTag}</hh:paraPr>`)
-      return paraXml.replace(/<hh:border\b[^>]*\/>/, tag => {
-        let out = setAttrOnTag(tag, 'borderFillIDRef', HWPX_STYLE.border.headingUnderline)
-        out = setAttrOnTag(out, 'offsetBottom', 120)
-        return out
-      })
-    })
-  }
-
   function charPrXml(id, height, bold, color = '#000000') {
     return `<hh:charPr id="${id}" height="${height}" textColor="${color}" shadeColor="none" useFontSpace="0" useKerning="0" symMark="NONE" borderFillIDRef="2"><hh:fontRef hangul="0" latin="0" hanja="0" japanese="0" other="0" symbol="0" user="0"/><hh:ratio hangul="100" latin="100" hanja="100" japanese="100" other="100" symbol="100" user="100"/><hh:spacing hangul="0" latin="0" hanja="0" japanese="0" other="0" symbol="0" user="0"/><hh:relSz hangul="100" latin="100" hanja="100" japanese="100" other="100" symbol="100" user="100"/><hh:offset hangul="0" latin="0" hanja="0" japanese="0" other="0" symbol="0" user="0"/>${bold ? '<hh:bold/>' : ''}<hh:underline type="NONE" shape="SOLID" color="#000000"/><hh:strikeout shape="NONE" color="#000000"/><hh:outline type="NONE"/><hh:shadow type="NONE" color="#B2B2B2" offsetX="10" offsetY="10"/></hh:charPr>`
   }
 
-  function paraPrXml(id, align, prev, next, left = 0, lineSpacing = 160, borderFillIDRef = 2, borderOffsetBottom = 0) {
-    return `<hh:paraPr id="${id}" tabPrIDRef="0" condense="0" fontLineHeight="0" snapToGrid="1" suppressLineNumbers="0" checked="0"><hh:align horizontal="${align}" vertical="BASELINE"/><hh:heading type="NONE" idRef="0" level="0"/><hh:breakSetting breakLatinWord="KEEP_WORD" breakNonLatinWord="BREAK_WORD" widowOrphan="1" keepWithNext="0" keepLines="0" pageBreakBefore="0" lineWrap="BREAK"/><hh:autoSpacing eAsianEng="1" eAsianNum="1"/><hh:margin><hc:intent value="0" unit="HWPUNIT"/><hc:left value="${left}" unit="HWPUNIT"/><hc:right value="0" unit="HWPUNIT"/><hc:prev value="${prev}" unit="HWPUNIT"/><hc:next value="${next}" unit="HWPUNIT"/></hh:margin><hh:lineSpacing type="PERCENT" value="${lineSpacing}" unit="HWPUNIT"/><hh:border borderFillIDRef="${borderFillIDRef}" offsetLeft="0" offsetRight="0" offsetTop="0" offsetBottom="${borderOffsetBottom}" connect="0" ignoreMargin="0"/></hh:paraPr>`
+  function paraPrXml(id, align, prev, next, left = 0, lineSpacing = 160) {
+    return `<hh:paraPr id="${id}" tabPrIDRef="0" condense="0" fontLineHeight="0" snapToGrid="1" suppressLineNumbers="0" checked="0"><hh:align horizontal="${align}" vertical="BASELINE"/><hh:heading type="NONE" idRef="0" level="0"/><hh:breakSetting breakLatinWord="KEEP_WORD" breakNonLatinWord="BREAK_WORD" widowOrphan="1" keepWithNext="0" keepLines="0" pageBreakBefore="0" lineWrap="BREAK"/><hh:autoSpacing eAsianEng="1" eAsianNum="1"/><hh:margin><hc:intent value="0" unit="HWPUNIT"/><hc:left value="${left}" unit="HWPUNIT"/><hc:right value="0" unit="HWPUNIT"/><hc:prev value="${prev}" unit="HWPUNIT"/><hc:next value="${next}" unit="HWPUNIT"/></hh:margin><hh:lineSpacing type="PERCENT" value="${lineSpacing}" unit="HWPUNIT"/><hh:border borderFillIDRef="2" offsetLeft="0" offsetRight="0" offsetTop="0" offsetBottom="0" connect="0" ignoreMargin="0"/></hh:paraPr>`
   }
 
   function borderFillXml(id, faceColor) {
@@ -3714,16 +3692,26 @@ ${text.slice(0, 8000)}`
     return `<hh:borderFill id="${id}" threeD="0" shadow="0" centerLine="NONE" breakCellSeparateLine="0"><hh:slash type="NONE" Crooked="0" isCounter="0"/><hh:backSlash type="NONE" Crooked="0" isCounter="0"/><hh:leftBorder type="NONE" width="0.1 mm" color="#999999"/><hh:rightBorder type="NONE" width="0.1 mm" color="#999999"/><hh:topBorder type="NONE" width="0.1 mm" color="#999999"/><hh:bottomBorder type="NONE" width="0.1 mm" color="#999999"/><hh:diagonal type="NONE" width="0.1 mm" color="#999999"/><hc:fillBrush><hc:winBrush faceColor="#8C8C8C" hatchColor="#FF000000" alpha="0"/></hc:fillBrush></hh:borderFill>`
   }
 
-  function headingUnderlineBorderFillXml(id) {
-    return `<hh:borderFill id="${id}" threeD="0" shadow="0" centerLine="NONE" breakCellSeparateLine="0"><hh:slash type="NONE" Crooked="0" isCounter="0"/><hh:backSlash type="NONE" Crooked="0" isCounter="0"/><hh:leftBorder type="NONE" width="0.1 mm" color="#333333"/><hh:rightBorder type="NONE" width="0.1 mm" color="#333333"/><hh:topBorder type="NONE" width="0.1 mm" color="#333333"/><hh:bottomBorder type="SOLID" width="0.25 mm" color="#333333"/><hh:diagonal type="NONE" width="0.1 mm" color="#333333"/><hc:fillBrush><hc:winBrush faceColor="#FFFFFF" hatchColor="#FF000000" alpha="0"/></hc:fillBrush></hh:borderFill>`
-  }
-
   function blocksToHwpxXml(blocks) {
-    return blocks.map((block, index) => {
-      if (block.type === 'table') return tableToHwpxXml(block, index)
-      if (block.type === 'box') return boxToHwpxXml(block, index)
+    const output = []
+    let sectionHeadingSeen = false
+    let lastWasDivider = false
+
+    blocks.forEach((block, index) => {
+      if (block.type === 'table') {
+        output.push(tableToHwpxXml(block, index))
+        lastWasDivider = false
+        return
+      }
+      if (block.type === 'box') {
+        output.push(boxToHwpxXml(block, index))
+        lastWasDivider = false
+        return
+      }
       if (block.type === 'hr') {
-        return separatorXml(index)
+        output.push(separatorXml(index))
+        lastWasDivider = true
+        return
       }
       const tag = block.tag || 'p'
       const { paraPr, charPr } = paragraphStyleForBlock(block)
@@ -3731,8 +3719,16 @@ ${text.slice(0, 8000)}`
       const paragraph = lines.length <= 1
         ? paragraphXml(block.text || '', paraPr, charPr)
         : lines.map(line => paragraphXml(line, paraPr, charPr)).join('')
-      return paragraph
-    }).join('')
+      const isDividerHeading = isSectionDividerHeadingBlock(block)
+      if (isDividerHeading && sectionHeadingSeen && !lastWasDivider) {
+        output.push(separatorXml(index, { compact: true }))
+      }
+      if (isDividerHeading) sectionHeadingSeen = true
+      output.push(paragraph)
+      lastWasDivider = false
+    })
+
+    return output.join('')
   }
 
   function paragraphStyleForBlock(block) {
@@ -3758,6 +3754,13 @@ ${text.slice(0, 8000)}`
     const tag = block.tag || 'p'
     if (tag === 'h2' || tag === 'h3') return true
     if (tag === 'li') return false
+    return isTemplateHeadingText(block.text)
+  }
+
+  function isSectionDividerHeadingBlock(block) {
+    const tag = block.tag || 'p'
+    if (tag === 'h2') return true
+    if (tag === 'li' || tag === 'h3') return false
     return isTemplateHeadingText(block.text)
   }
 
