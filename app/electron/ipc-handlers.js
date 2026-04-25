@@ -2729,8 +2729,15 @@ ${text.slice(0, 8000)}`
   }
 
   function isTemplateHeadingText(text) {
-    return /^\d+\.\s+/.test(text)
+    return isLikelySectionHeadingText(text)
       || /^(참석자|불참자|안건|토의 내용|결정 사항|차기 회의|신청 방법|유의 사항|문의처|현황|소요 예산|추진 일정)$/.test(text)
+  }
+
+  function isLikelySectionHeadingText(text) {
+    const value = normalizeStyleHintText(text)
+    if (!value || value.length > 60) return false
+    return /^\d+\.\s+/.test(value)
+      && /(개요|배경|현황|분석|검토|제안|개선|결론|계획|목적|목표|방안|효과|예산|일정|필요성|추진|성과|문제|대응|향후|요약|주요|내용)/.test(value)
   }
 
   function decodeXmlEntities(value) {
@@ -3733,18 +3740,25 @@ ${text.slice(0, 8000)}`
     const className = String(block.className || '')
     const isMainTitle = tag === 'h1' || hasClassToken(className, 'notice-title') || hasClassToken(className, 'gong-header')
     const isSubTitle = isTemplateSubtitleBlock(block)
+    const isSectionHeading = isSectionHeadingBlock(block)
     const charPr = isMainTitle ? HWPX_STYLE.char.title
-      : tag === 'h2' ? HWPX_STYLE.char.heading2
-      : tag === 'h3' ? HWPX_STYLE.char.heading3
+      : isSectionHeading ? (tag === 'h3' ? HWPX_STYLE.char.heading3 : HWPX_STYLE.char.heading2)
       : block.meta || isSubTitle ? HWPX_STYLE.char.meta
       : block.bold ? HWPX_STYLE.char.boldBody
       : HWPX_STYLE.char.body
     const paraPr = isMainTitle || isSubTitle ? HWPX_STYLE.para.title
       : block.align === 'right' ? HWPX_STYLE.para.right
-      : tag === 'h2' || tag === 'h3' ? HWPX_STYLE.para.heading
+      : isSectionHeading ? HWPX_STYLE.para.heading
       : tag === 'li' ? HWPX_STYLE.para.list
       : HWPX_STYLE.para.body
     return { paraPr, charPr }
+  }
+
+  function isSectionHeadingBlock(block) {
+    const tag = block.tag || 'p'
+    if (tag === 'h2' || tag === 'h3') return true
+    if (tag === 'li') return false
+    return isTemplateHeadingText(block.text)
   }
 
   function isTemplateSubtitleBlock(block) {
