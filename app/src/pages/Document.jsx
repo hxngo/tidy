@@ -699,6 +699,108 @@ function extractTemplateParts(html, fallbackCss = TEMPLATES[0]?.css || '') {
   }
 }
 
+function sanitizeTemplateCss(css) {
+  return String(css || '')
+    .replace(/<\/?style\b[^>]*>/gi, '')
+    .replace(/<\/?script\b[^>]*>/gi, '')
+    .replace(/@import\s+[^;]+;/gi, '')
+    .replace(/url\(\s*(['"]?)javascript:[^)]+\)/gi, 'url("#")')
+    .replace(/expression\s*\([^)]*\)/gi, '')
+    .trim()
+}
+
+function cleanTemplateStructure(html) {
+  const safeHtml = sanitizeDocumentHtml(ensureFullHtml(html || '<h1>새 템플릿</h1><p></p>', ''))
+  return extractTemplateParts(safeHtml, '').structure || '<h1>새 템플릿</h1><p></p>'
+}
+
+function guessTemplateNameFromUrl(rawUrl) {
+  try {
+    const url = new URL(rawUrl)
+    const last = decodeURIComponent(url.pathname.split('/').filter(Boolean).pop() || '')
+      .replace(/\.(html?|md|css|json)$/i, '')
+      .replace(/[-_]+/g, ' ')
+      .trim()
+    return last || url.hostname.replace(/^www\./, '')
+  } catch {
+    return '인터넷 템플릿'
+  }
+}
+
+function buildTemplateFromRemote({ url, contentType, content }, nameOverride = '') {
+  const source = String(content || '')
+  const trimmed = source.trim()
+  const fallbackCss = TEMPLATES[0]?.css || ''
+  const guessedName = nameOverride.trim() || guessTemplateNameFromUrl(url)
+
+  const makeTemplate = ({ name, css, structure, aiPrompt, icon = '🌐', desc }) => ({
+    id: `custom-web-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    name: String(nameOverride.trim() || name || guessedName).slice(0, 42),
+    icon,
+    desc: desc || '인터넷에서 가져온 템플릿',
+    css: sanitizeTemplateCss(css || fallbackCss) || fallbackCss,
+    structure: cleanTemplateStructure(structure),
+    aiPrompt: aiPrompt || `${nameOverride.trim() || name || guessedName} 템플릿 구조를 유지하고 원본 내용을 적절한 위치에 매핑`,
+    custom: true,
+    sourceUrl: url,
+  })
+
+  if (!trimmed) throw new Error('템플릿 내용이 비어 있습니다.')
+
+  if (/json/i.test(contentType || '') || trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed)
+      const html = parsed.html || parsed.body || parsed.structure || ''
+      const parts = extractTemplateParts(html, parsed.css || fallbackCss)
+      return makeTemplate({
+        name: parsed.name,
+        icon: parsed.icon || '🌐',
+        desc: parsed.desc,
+        css: parsed.css || parts.css,
+        structure: parsed.structure || parts.structure,
+        aiPrompt: parsed.aiPrompt,
+      })
+    } catch (e) {
+      if (/json/i.test(contentType || '')) throw new Error('JSON 템플릿 형식이 올바르지 않습니다.')
+    }
+  }
+
+  if (/text\/css/i.test(contentType || '') || /\.css(?:$|[?#])/i.test(String(url || ''))) {
+    return makeTemplate({
+      css: source,
+      structure: `
+<h1>${escapeHtml(guessedName)}</h1>
+<p class="center meta">인터넷에서 가져온 CSS 템플릿</p>
+<hr/>
+<h2>1. 개요</h2>
+<p></p>
+<h2>2. 주요 내용</h2>
+<table><tr><th>구분</th><th>내용</th><th>비고</th></tr><tr><td></td><td></td><td></td></tr></table>
+<h2>3. 결론</h2>
+<p></p>
+      `.trim(),
+    })
+  }
+
+  if (/markdown/i.test(contentType || '') || /\.md(?:$|[?#])/i.test(String(url || ''))) {
+    const html = markdownToHtml(source)
+    const parts = extractTemplateParts(html, fallbackCss)
+    return makeTemplate({ css: parts.css, structure: parts.structure })
+  }
+
+  const doc = new DOMParser().parseFromString(source, 'text/html')
+  const title = doc.querySelector('title')?.textContent?.trim()
+  const css = Array.from(doc.querySelectorAll('style')).map(style => style.textContent || '').join('\n').trim()
+  const body = doc.body?.innerHTML?.trim()
+  const hasHtmlTags = /<\/?[a-z][\s\S]*>/i.test(source)
+  const html = hasHtmlTags && body ? body : markdownToHtml(source)
+  return makeTemplate({
+    name: title,
+    css: css || fallbackCss,
+    structure: html,
+  })
+}
+
 function htmlLinesForDiff(html) {
   return plainTextFromHtml(html)
     .split(/\n+/)
@@ -768,6 +870,11 @@ export default function Document() {
   const [notice, setNotice]             = useState(null)
   const [pasteOpen, setPasteOpen]       = useState(false)
   const [pasteText, setPasteText]       = useState('')
+  const [templateImportOpen, setTemplateImportOpen] = useState(false)
+  const [templateImportUrl, setTemplateImportUrl] = useState('')
+  const [templateImportName, setTemplateImportName] = useState('')
+  const [templateImportLoading, setTemplateImportLoading] = useState(false)
+  const [templateImportPreview, setTemplateImportPreview] = useState(null)
   const [customTemplates, setCustomTemplates] = useState([])
   const [kbContext, setKbContext]       = useState(null)
   const workspaceLoadedRef = useRef(false)
@@ -1161,6 +1268,15 @@ export default function Document() {
     setNotice({ type: 'success', message: '선택한 버전을 새 최신 버전으로 복원했습니다.' })
   }
 
+  function persistCustomTemplate(template) {
+    setCustomTemplates(prev => {
+      const next = [...prev.filter(t => t.id !== template.id), template]
+      localStorage.setItem(CUSTOM_TEMPLATES_KEY, JSON.stringify(next))
+      return next
+    })
+    setTemplateId(template.id)
+  }
+
   function saveCurrentAsTemplate() {
     const html = getHtmlForExport() || sourceHtml
     if (!html) return
@@ -1177,13 +1293,48 @@ export default function Document() {
       aiPrompt: `${name.trim()} 템플릿 구조를 유지하고 빈 영역에 원본 내용을 매핑`,
       custom: true,
     }
-    setCustomTemplates(prev => {
-      const next = [...prev, template]
-      localStorage.setItem(CUSTOM_TEMPLATES_KEY, JSON.stringify(next))
-      return next
-    })
-    setTemplateId(template.id)
+    persistCustomTemplate(template)
     setNotice({ type: 'success', message: `${template.name} 템플릿을 저장했습니다.` })
+  }
+
+  function resetTemplateImportModal() {
+    setTemplateImportOpen(false)
+    setTemplateImportUrl('')
+    setTemplateImportName('')
+    setTemplateImportLoading(false)
+    setTemplateImportPreview(null)
+  }
+
+  async function fetchInternetTemplate() {
+    const url = templateImportUrl.trim()
+    if (!url) { setError('가져올 템플릿 URL을 입력하세요.'); return }
+    setTemplateImportLoading(true); setError(null); setNotice(null)
+    try {
+      const result = await window.tidy?.document.fetchTemplateUrl(url)
+      if (!result?.content) throw new Error('템플릿 내용이 비어 있습니다.')
+      const template = buildTemplateFromRemote(result, templateImportName)
+      setTemplateImportPreview(template)
+      if (!templateImportName.trim()) setTemplateImportName(template.name)
+      setNotice({ type: 'success', message: `${template.name} 템플릿을 가져왔습니다. 미리보기 후 저장하세요.` })
+    } catch (e) {
+      setError(e?.message || '인터넷 템플릿 가져오기 실패')
+    } finally {
+      setTemplateImportLoading(false)
+    }
+  }
+
+  function saveInternetTemplate({ apply = false } = {}) {
+    if (!templateImportPreview) return
+    const template = {
+      ...templateImportPreview,
+      name: templateImportName.trim() || templateImportPreview.name,
+    }
+    persistCustomTemplate(template)
+    resetTemplateImportModal()
+    setNotice({ type: 'success', message: `${template.name} 템플릿을 추가했습니다.` })
+    if (apply && rawText.trim()) {
+      setTimeout(() => reorganize({ template, mode: 'template' }), 0)
+    }
   }
 
   function saveSourceEdit() {
@@ -1392,6 +1543,10 @@ export default function Document() {
           </button>
         )}
 
+        <button onClick={() => setTemplateImportOpen(true)} className="text-[10px] px-2.5 py-1.5 rounded-lg border border-[#1a1c28] text-[#9a9cb8] hover:text-[#e0e0f0] hover:border-[#252840] transition-colors">
+          URL 템플릿
+        </button>
+
         {/* 내보내기 */}
         {hasVersions && (
           <div className="relative group">
@@ -1465,7 +1620,15 @@ export default function Document() {
 
             {/* 템플릿 썸네일 갤러리 */}
             <div className="px-3 pt-3 pb-2">
-              <p className="text-[9px] text-[#303248] uppercase tracking-widest mb-2.5 font-semibold">템플릿 선택</p>
+              <div className="flex items-center justify-between mb-2.5">
+                <p className="text-[9px] text-[#303248] uppercase tracking-widest font-semibold">템플릿 선택</p>
+                <button
+                  onClick={() => setTemplateImportOpen(true)}
+                  className="text-[9px] px-1.5 py-0.5 rounded border border-[#1a1c28] text-[#505272] hover:text-[#a5b4fc] hover:border-[#353760] transition-colors"
+                >
+                  URL 추가
+                </button>
+              </div>
               <div className="flex flex-col gap-2">
                 {allTemplates.map(t => {
                   const isSelected = templateId === t.id
@@ -1690,6 +1853,76 @@ export default function Document() {
           )}
         </div>
       </div>}
+
+      {/* ── 인터넷 템플릿 가져오기 모달 ─────────────────────────────────── */}
+      {templateImportOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: 'rgba(0,0,0,0.62)', backdropFilter: 'blur(4px)' }}>
+          <div className="w-[760px] max-w-full max-h-[86vh] flex flex-col rounded-2xl border border-[#1a1c28] overflow-hidden"
+            style={{ background: 'var(--card-bg)' }}>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-[#13141c]">
+              <p className="text-[12px] text-[#9a9cb8] font-medium">인터넷 템플릿 추가</p>
+              <button onClick={resetTemplateImportModal} className="text-[#505272] hover:text-[#9a9cb8] transition-colors text-sm">✕</button>
+            </div>
+            <div className="flex-shrink-0 grid grid-cols-[1fr_auto] gap-2 px-4 py-3 border-b border-[#13141c]">
+              <input
+                value={templateImportUrl}
+                onChange={e => { setTemplateImportUrl(e.target.value); setTemplateImportPreview(null) }}
+                onKeyDown={e => e.key === 'Enter' && fetchInternetTemplate()}
+                placeholder="https://example.com/template.html"
+                className="text-[11px] px-3 py-2 rounded-lg border border-[#1a1c28] bg-[#0c0d14] text-[#c8c8d8] placeholder:text-[#303248] focus:outline-none focus:border-[#353760]"
+              />
+              <button
+                onClick={fetchInternetTemplate}
+                disabled={templateImportLoading || !templateImportUrl.trim()}
+                className="flex items-center justify-center gap-2 text-[11px] px-4 py-2 rounded-lg border border-[#353760] bg-[#1a1c30] text-[#a5b4fc] hover:bg-[#22244a] transition-colors disabled:opacity-40 min-w-[96px]"
+              >
+                {templateImportLoading ? <Spinner /> : '가져오기'}
+              </button>
+              <input
+                value={templateImportName}
+                onChange={e => setTemplateImportName(e.target.value)}
+                placeholder="템플릿 이름"
+                className="col-span-2 text-[11px] px-3 py-2 rounded-lg border border-[#1a1c28] bg-[#0c0d14] text-[#c8c8d8] placeholder:text-[#303248] focus:outline-none focus:border-[#353760]"
+              />
+            </div>
+            <div className="flex-1 min-h-[320px] overflow-hidden bg-[#09090f]">
+              {templateImportPreview ? (
+                <iframe
+                  srcDoc={sanitizeDocumentHtml(`<!DOCTYPE html><html><head><meta charset="utf-8"><style>${templateImportPreview.css} body { padding: 36px 48px; }</style></head><body>${templateImportPreview.structure}</body></html>`)}
+                  sandbox="allow-same-origin"
+                  className="w-full h-full bg-white"
+                  title="internet-template-preview"
+                />
+              ) : (
+                <div className="h-full flex items-center justify-center text-[12px] text-[#505272]">
+                  HTML · CSS · JSON · Markdown
+                </div>
+              )}
+            </div>
+            <div className="flex-shrink-0 flex items-center justify-end gap-2 px-4 py-3 border-t border-[#13141c]">
+              <button onClick={resetTemplateImportModal} className="text-[11px] text-[#505272] hover:text-[#9a9cb8] px-3 py-1.5 transition-colors">
+                취소
+              </button>
+              <button
+                onClick={() => saveInternetTemplate()}
+                disabled={!templateImportPreview}
+                className="text-[11px] px-4 py-1.5 rounded-lg border border-[#1a1c28] text-[#9a9cb8] hover:text-[#e0e0f0] hover:border-[#252840] transition-colors disabled:opacity-40"
+              >
+                저장
+              </button>
+              {rawText && (
+                <button
+                  onClick={() => saveInternetTemplate({ apply: true })}
+                  disabled={!templateImportPreview || aiLoading}
+                  className="text-[11px] px-4 py-1.5 rounded-lg bg-[#1a1c30] text-[#a5b4fc] border border-[#353760] hover:bg-[#22244a] transition-colors disabled:opacity-40"
+                >
+                  저장 후 적용
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── 텍스트 붙여넣기 모달 ───────────────────────────────────────────── */}
       {pasteOpen && (

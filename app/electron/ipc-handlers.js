@@ -2108,28 +2108,55 @@ function setupIpcHandlers(ipcMain, getWindow) {
     }
   })
 
+  async function publishSkillToMarketplace(skill, authorName) {
+    const base = getMarketUrl()
+    const authorId    = store.get('marketAuthorId')    || (() => { const id = require('crypto').randomUUID(); store.set('marketAuthorId', id); return id })()
+    const authorToken = store.get('marketAuthorToken') || (() => { const tk = require('crypto').randomUUID(); store.set('marketAuthorToken', tk); return tk })()
+    const body = {
+      label: skill.label, icon: skill.icon, color: skill.color,
+      desc: skill.desc, detail: skill.detail,
+      system_prompt: skill.systemPrompt,
+      examples: skill.examples || [], tip: skill.tip || '',
+      author_name: authorName || store.get('marketAuthorName') || '익명',
+      author_id: authorId, author_token: authorToken,
+      category: skill.category || 'general', tags: skill.tags || [],
+    }
+    const res = await fetch(`${base}/api/skills`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const data = await res.json()
+    if (!res.ok) return { error: data.error || '등록 실패' }
+    if (authorName) store.set('marketAuthorName', authorName)
+    return { success: true, marketId: data.id }
+  }
+
   ipcMain.handle('marketplace:publish', async (_event, { skill, authorName }) => {
     try {
-      const base = getMarketUrl()
-      const authorId    = store.get('marketAuthorId')    || (() => { const id = require('crypto').randomUUID(); store.set('marketAuthorId', id); return id })()
-      const authorToken = store.get('marketAuthorToken') || (() => { const tk = require('crypto').randomUUID(); store.set('marketAuthorToken', tk); return tk })()
-      const body = {
-        label: skill.label, icon: skill.icon, color: skill.color,
-        desc: skill.desc, detail: skill.detail,
-        system_prompt: skill.systemPrompt,
-        examples: skill.examples || [], tip: skill.tip || '',
-        author_name: authorName || store.get('marketAuthorName') || '익명',
-        author_id: authorId, author_token: authorToken,
-        category: skill.category || 'general', tags: skill.tags || [],
-      }
-      const res = await fetch(`${base}/api/skills`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+      return await publishSkillToMarketplace(skill, authorName)
+    } catch (e) {
+      return { error: e.message }
+    }
+  })
+
+  ipcMain.handle('skill:publish-custom', async (_event, { id, category = 'general', tags = [], authorName = '' }) => {
+    try {
+      const skill = vault.getCustomSkills().find(s => s.id === id)
+      if (!skill) return { error: '공유할 커스텀 스킬을 찾을 수 없습니다' }
+      if (!skill.systemPrompt?.trim()) return { error: '시스템 프롬프트가 비어 있어 공유할 수 없습니다' }
+      const publishTarget = { ...skill, category, tags }
+      const result = await publishSkillToMarketplace(publishTarget, authorName)
+      if (result.error) return result
+      const saved = vault.saveCustomSkill({
+        ...skill,
+        category,
+        tags,
+        marketId: result.marketId,
+        publishedAt: new Date().toISOString(),
+        authorName: authorName || store.get('marketAuthorName') || '익명',
+        source: skill.source || 'user',
       })
-      const data = await res.json()
-      if (!res.ok) return { error: data.error || '등록 실패' }
-      if (authorName) store.set('marketAuthorName', authorName)
-      return { success: true, marketId: data.id }
+      return { success: true, marketId: result.marketId, skill: saved }
     } catch (e) {
       return { error: e.message }
     }
@@ -2146,7 +2173,9 @@ function setupIpcHandlers(ipcMain, getWindow) {
         desc: data.desc, detail: data.detail,
         systemPrompt: data.system_prompt,
         examples: data.examples, tip: data.tip,
-        type: 'custom', source: 'market', marketId: data.id,
+        type: 'custom', source: 'marketplace', marketId: data.id,
+        category: data.category || 'general', tags: data.tags || [],
+        publishedAt: data.created_at || null, authorName: data.author_name || '',
       })
       fetch(`${base}/api/skills/${id}/install`, { method: 'POST' }).catch(() => {})
       return { success: true, skill: saved }
@@ -2228,6 +2257,55 @@ function setupIpcHandlers(ipcMain, getWindow) {
     } catch (e) {
       console.error('[Document] 파일 읽기 오류:', e.message)
       return null
+    }
+  })
+
+  ipcMain.handle('document:fetch-template-url', async (_event, inputUrl) => {
+    const rawUrl = String(inputUrl || '').trim()
+    let parsed
+    try {
+      parsed = new URL(rawUrl)
+    } catch {
+      throw new Error('올바른 URL을 입력하세요.')
+    }
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      throw new Error('http 또는 https URL만 가져올 수 있습니다.')
+    }
+    const blockedHosts = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1'])
+    if (blockedHosts.has(parsed.hostname.toLowerCase())) {
+      throw new Error('로컬 주소는 인터넷 템플릿으로 가져올 수 없습니다.')
+    }
+
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 12_000)
+    try {
+      const res = await fetch(parsed.href, {
+        signal: controller.signal,
+        redirect: 'follow',
+        headers: {
+          Accept: 'text/html,application/json,text/markdown,text/plain,text/css;q=0.9,*/*;q=0.5',
+          'User-Agent': 'Tidy Document Template Importer',
+        },
+      })
+      if (!res.ok) throw new Error(`가져오기 실패: HTTP ${res.status}`)
+      const contentLength = Number(res.headers.get('content-length') || 0)
+      if (contentLength > 1_500_000) {
+        throw new Error('템플릿 파일이 너무 큽니다. 1.5MB 이하의 HTML/CSS/JSON 파일을 사용하세요.')
+      }
+      const content = await res.text()
+      if (content.length > 1_500_000) {
+        throw new Error('템플릿 파일이 너무 큽니다. 1.5MB 이하의 HTML/CSS/JSON 파일을 사용하세요.')
+      }
+      return {
+        url: res.url || parsed.href,
+        contentType: res.headers.get('content-type') || '',
+        content,
+      }
+    } catch (e) {
+      if (e?.name === 'AbortError') throw new Error('템플릿 가져오기 시간이 초과되었습니다.')
+      throw new Error(e?.message || '템플릿을 가져오지 못했습니다.')
+    } finally {
+      clearTimeout(timeout)
     }
   })
 

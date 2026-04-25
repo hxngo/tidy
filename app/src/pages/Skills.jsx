@@ -328,9 +328,11 @@ function PublishModal({ skill, onClose, onPublished }) {
     setError('')
     try {
       const tags = tagsInput.split(',').map(t => t.trim()).filter(Boolean)
-      const res  = await window.tidy?.marketplace.publish({ skill: { ...skill, category, tags }, authorName })
+      const res = skill.id
+        ? await window.tidy?.skills.publishCustom({ id: skill.id, category, tags, authorName })
+        : await window.tidy?.marketplace.publish({ skill: { ...skill, category, tags }, authorName })
       if (res?.error) { setError(res.error); return }
-      onPublished()
+      onPublished(res)
     } catch (e) {
       setError(e.message)
     } finally {
@@ -345,7 +347,9 @@ function PublishModal({ skill, onClose, onPublished }) {
           <span className="w-8 h-8 rounded-xl flex items-center justify-center text-sm flex-shrink-0" style={{ background: (skill.color || '#6366f1') + '20', color: skill.color || '#6366f1' }}>{skill.icon || '★'}</span>
           <div className="flex-1">
             <p className="text-[13px] font-semibold text-[#e0e0f0]">마켓에 공유하기</p>
-            <p className="text-[11px] text-[#505272]">{skill.label}</p>
+            <p className="text-[11px] text-[#505272]">
+              {skill.label}{skill.marketId ? ' · 이미 공유됨' : ''}
+            </p>
           </div>
           <button onClick={onClose} className="text-[#505272] hover:text-[#9a9cb8]">
             <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M2 2l12 12M14 2L2 14"/></svg>
@@ -372,6 +376,11 @@ function PublishModal({ skill, onClose, onPublished }) {
               className="w-full bg-[#09090c] border border-[#1a1c28] rounded-xl px-3 py-2 text-[12px] text-[#c8c8d8] placeholder-[#2a2c48] focus:outline-none focus:border-[#c026d3]/40 transition-colors" />
           </div>
           {error && <p className="text-[11px] text-red-400">{error}</p>}
+          {skill.marketId && (
+            <p className="text-[10px] text-amber-300 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-2">
+              다시 공유하면 마켓에 새 항목으로 등록되고 이 스킬의 공유 ID가 최신 항목으로 갱신됩니다.
+            </p>
+          )}
         </div>
         <div className="flex gap-2 px-5 pb-5 pt-2">
           <button onClick={onClose} className="flex-1 py-2 text-[12px] text-[#6b6e8c] hover:text-[#9a9cb8] border border-[#1a1c28] rounded-xl">취소</button>
@@ -390,7 +399,7 @@ function PublishModal({ skill, onClose, onPublished }) {
 const SKILL_COLORS = ['#6366f1','#0ea5e9','#8b5cf6','#3b82f6','#f59e0b','#10b981','#84cc16','#f97316','#ef4444','#c026d3','#0891b2','#65a30d']
 const SKILL_ICONS  = ['★','◈','▤','✦','⇄','◉','▷','◻','◫','⊞','⊛','⧉','◆','▲','●','♦','⬟','⬡','✿','❋']
 
-function CreateSkillModal({ skill, onClose, onSaved, onDeleted }) {
+function CreateSkillModal({ skill, onClose, onSaved, onDeleted, onUpdated }) {
   const isEdit = !!skill
   const [tab, setTab] = useState(isEdit ? 'manual' : 'nl')
   const [nlDesc, setNlDesc]   = useState('')
@@ -410,6 +419,14 @@ function CreateSkillModal({ skill, onClose, onSaved, onDeleted }) {
   const [deleting, setDeleting] = useState(false)
   const [showPublish, setShowPublish] = useState(false)
   const [publishSuccess, setPublishSuccess] = useState(false)
+  const [marketMeta, setMarketMeta] = useState({
+    source: skill?.source || 'user',
+    category: skill?.category || 'general',
+    tags: skill?.tags || [],
+    marketId: skill?.marketId || null,
+    publishedAt: skill?.publishedAt || null,
+    authorName: skill?.authorName || '',
+  })
 
   async function handleGenerate() {
     if (!nlDesc.trim()) return
@@ -440,7 +457,13 @@ function CreateSkillModal({ skill, onClose, onSaved, onDeleted }) {
         id: skill?.id || null, label: label.trim(), icon, color,
         desc: desc.trim(), detail: detail.trim(), systemPrompt: systemPrompt.trim(),
         examples: getExamplesArray(), tip: tip.trim(),
-        type: 'custom', source: 'user',
+        type: 'custom',
+        source: marketMeta.source,
+        category: marketMeta.category,
+        tags: marketMeta.tags,
+        marketId: marketMeta.marketId,
+        publishedAt: marketMeta.publishedAt,
+        authorName: marketMeta.authorName,
       })
       if (res?.error) { setSaveError(res.error); return }
       onSaved()
@@ -456,7 +479,13 @@ function CreateSkillModal({ skill, onClose, onSaved, onDeleted }) {
     finally { setDeleting(false) }
   }
 
-  const savedSkillObj = { ...skill, label, icon, color, desc, detail, systemPrompt, examples: getExamplesArray(), tip, type: 'custom' }
+  const savedSkillObj = {
+    ...skill,
+    label, icon, color, desc, detail, systemPrompt,
+    examples: getExamplesArray(), tip,
+    type: 'custom',
+    ...marketMeta,
+  }
 
   return (
     <>
@@ -618,7 +647,19 @@ function CreateSkillModal({ skill, onClose, onSaved, onDeleted }) {
     </div>
     {showPublish && (
       <PublishModal skill={savedSkillObj} onClose={() => setShowPublish(false)}
-        onPublished={() => { setShowPublish(false); setPublishSuccess(true) }} />
+        onPublished={(res) => {
+          setMarketMeta(prev => ({
+            ...prev,
+            category: res?.skill?.category || prev.category,
+            tags: res?.skill?.tags || prev.tags,
+            marketId: res?.marketId || res?.skill?.marketId || prev.marketId,
+            publishedAt: res?.skill?.publishedAt || new Date().toISOString(),
+            authorName: res?.skill?.authorName || prev.authorName,
+          }))
+          setShowPublish(false)
+          setPublishSuccess(true)
+          onUpdated?.()
+        }} />
     )}
     </>
   )
@@ -638,6 +679,7 @@ function MySkillsTab({ customSkills, onRefresh }) {
   const [searchQ, setSearchQ]               = useState('')
   const [hiddenSkills, setHiddenSkills]     = useState(new Set())  // 숨긴 기본 스킬 ID
   const [editMode, setEditMode]             = useState(false)      // 숨기기 편집 모드
+  const [shareNotice, setShareNotice]       = useState('')
 
   const allSkills = [...AI_SKILLS, ...NLM_SKILLS, ...customSkills]
   const skillCounts = {}
@@ -791,7 +833,7 @@ function MySkillsTab({ customSkills, onRefresh }) {
         <div className="flex items-center justify-between mb-3">
           <div>
             <h2 className="text-[13px] font-semibold text-[#e0e0f0]">내 커스텀 스킬</h2>
-            <p className="text-[11px] text-[#505272] mt-0.5">직접 만든 AI 스킬</p>
+            <p className="text-[11px] text-[#505272] mt-0.5">직접 만든 AI 스킬을 마켓플레이스에 공유할 수 있습니다</p>
           </div>
           <button onClick={() => { setEditingSkill(null); setShowCreate(true) }}
             className="flex items-center gap-1.5 text-[11px] text-[#c026d3] hover:text-[#e879f9] border border-[#c026d3]/30 hover:border-[#c026d3]/60 px-3 py-1.5 rounded-lg transition-colors">
@@ -799,11 +841,19 @@ function MySkillsTab({ customSkills, onRefresh }) {
             스킬 만들기
           </button>
         </div>
+        {shareNotice && (
+          <div className="mb-3 flex items-center justify-between gap-2 rounded-lg border border-emerald-700/30 bg-emerald-900/20 px-3 py-2 text-[11px] text-emerald-400">
+            <span>{shareNotice}</span>
+            <button onClick={() => setShareNotice('')} className="text-emerald-600 hover:text-emerald-300">닫기</button>
+          </div>
+        )}
         {customSkills.length === 0 ? (
           <p className="text-[11px] text-[#303050] py-2">아직 만든 스킬이 없습니다. "스킬 만들기"를 눌러 AI로 스킬을 생성해보세요.</p>
         ) : (
           <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-5 lg:grid-cols-6">
-            {customSkills.map(skill => (
+            {customSkills.map(skill => {
+              const canShare = skill.source !== 'marketplace'
+              return (
               <div key={skill.id} className="relative group">
                 {/* 삭제 확인 오버레이 */}
                 {deletingId === skill.id ? (
@@ -833,13 +883,24 @@ function MySkillsTab({ customSkills, onRefresh }) {
                   <div className="w-7 h-7 rounded-lg flex items-center justify-center text-sm" style={{ background: (skill.color || '#c026d3') + '22', color: skill.color || '#c026d3' }}>{skill.icon || '★'}</div>
                   <div>
                     <p className="text-[11px] font-medium text-[#c8c8d8] leading-none truncate max-w-[72px]">{skill.label}</p>
-                    <p className="text-[9px] text-[#505272] mt-0.5">커스텀</p>
+                    <p className={`text-[9px] mt-0.5 ${skill.marketId && canShare ? 'text-emerald-400' : 'text-[#505272]'}`}>
+                      {!canShare ? '마켓 설치' : skill.marketId ? '공유됨' : '커스텀'}
+                    </p>
                   </div>
                 </button>
 
-                {/* 호버 액션 버튼 (수정 / 삭제) */}
+                {/* 호버 액션 버튼 (공유 / 수정 / 삭제) */}
                 {deletingId !== skill.id && (
                   <div className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 flex gap-0.5 transition-all">
+                    {canShare && (
+                      <button
+                        onClick={e => { e.stopPropagation(); setPublishTarget(skill) }}
+                        title={skill.marketId ? '다시 공유' : '마켓에 공유'}
+                        className="p-1 rounded-md bg-[#1a1c28] text-emerald-400 hover:bg-[#10251b] hover:text-emerald-300 transition-colors"
+                      >
+                        <IconShare size={9} />
+                      </button>
+                    )}
                     <button
                       onClick={e => { e.stopPropagation(); setEditingSkill(skill); setShowCreate(true) }}
                       title="수정"
@@ -857,7 +918,8 @@ function MySkillsTab({ customSkills, onRefresh }) {
                   </div>
                 )}
               </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>
@@ -910,6 +972,18 @@ function MySkillsTab({ customSkills, onRefresh }) {
           onClose={() => { setShowCreate(false); setEditingSkill(null) }}
           onSaved={async () => { await onRefresh(); setShowCreate(false); setEditingSkill(null) }}
           onDeleted={async () => { await onRefresh(); setShowCreate(false); setEditingSkill(null) }}
+          onUpdated={onRefresh}
+        />
+      )}
+      {publishTarget && (
+        <PublishModal
+          skill={publishTarget}
+          onClose={() => setPublishTarget(null)}
+          onPublished={async (res) => {
+            setPublishTarget(null)
+            setShareNotice(`${res?.skill?.label || publishTarget.label} 스킬을 마켓플레이스에 공유했습니다.`)
+            await onRefresh()
+          }}
         />
       )}
     </div>

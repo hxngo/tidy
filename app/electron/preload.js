@@ -200,6 +200,7 @@ contextBridge.exposeInMainWorld('tidy', {
     listCustom: () => ipcRenderer.invoke('skill:list-custom'),
     saveCustom: (skill) => ipcRenderer.invoke('skill:save-custom', skill),
     deleteCustom: (id) => ipcRenderer.invoke('skill:delete-custom', { id }),
+    publishCustom: (params) => ipcRenderer.invoke('skill:publish-custom', params),
     generate: (params) => ipcRenderer.invoke('skill:generate', params),
   },
 
@@ -220,6 +221,7 @@ contextBridge.exposeInMainWorld('tidy', {
     readText:    (fp)     => ipcRenderer.invoke('document:read-text', fp),
     importDocx:  (fp)     => ipcRenderer.invoke('document:import-docx', fp),
     importPdf:   (fp)     => ipcRenderer.invoke('document:import-pdf', fp),
+    fetchTemplateUrl: (url) => ipcRenderer.invoke('document:fetch-template-url', url),
     reorganize:  (params) => ipcRenderer.invoke('document:reorganize', params),
     editHtml:    (params) => ipcRenderer.invoke('document:edit-html', params),
     exportDocx:  (params) => ipcRenderer.invoke('document:export-docx', params),

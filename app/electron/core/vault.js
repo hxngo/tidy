@@ -1270,6 +1270,11 @@ function saveCustomSkill(skill) {
     tip: skill.tip || '',
     type: 'custom',
     source: skill.source || 'user',  // 'user' | 'marketplace'
+    category: skill.category || 'general',
+    tags: Array.isArray(skill.tags) ? skill.tags : [],
+    marketId: skill.marketId || null,
+    publishedAt: skill.publishedAt || null,
+    authorName: skill.authorName || '',
     created_at: skill.created_at || now,
     updated_at: now,
   }

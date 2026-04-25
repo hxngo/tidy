@@ -24,7 +24,7 @@ flowchart LR
 |---|---|---|
 | Import Pipeline | HWP, DOCX, PDF를 HTML/text/DocumentIR로 변환 | 문서 탭 PDF import 추가 |
 | DocumentIR | 제목, 문단, 표, 리스트, 강조 요소의 중간 표현 | renderer/import 단계에서 생성 |
-| Template Engine | 원본 내용을 템플릿 구조에 매핑 | 보고서, 공문, 회의록, 제안서, 안내문 + 사용자 저장 템플릿 |
+| Template Engine | 원본 내용을 템플릿 구조에 매핑 | 기본 템플릿, 사용자 저장 템플릿, 인터넷 URL 템플릿 |
 | Real-time Editor | iframe contentEditable 기반 HTML 편집 | 직접 수정, 선택 영역 자연어 명령 |
 | Version Manager | 버전 저장, 롤백, 비교 | v1 자동 생성, 새 버전 저장, 비교, 롤백 저장 |
 | Knowledge Base | 조직명, 부서, 용어집, 프로필 맥락 참조 | 문서 재구성/자연어 수정 프롬프트에 연결 |
@@ -52,7 +52,7 @@ flowchart LR
 3. 원본 유지 모드와 템플릿 재구성 모드를 분리한다.
 4. 선택 영역 또는 전체 문서에 자연어 명령을 적용한다.
 5. 버전 비교와 롤백 저장을 제공한다.
-6. 사용자 템플릿 저장을 제공한다.
+6. 사용자 템플릿 저장과 인터넷 URL 템플릿 추가를 제공한다.
 7. Knowledge Base를 문서 생성/수정 프롬프트에 연결한다.
 8. Word/PDF를 기준 export로 두고 HWPX는 가능한 수준까지 근접시킨다.
 
