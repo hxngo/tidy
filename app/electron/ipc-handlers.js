@@ -2606,6 +2606,7 @@ ${text.slice(0, 8000)}`
       tableBody: 4,
       tableHeader: 5,
       noteBox: 6,
+      separator: 7,
     },
   }
 
@@ -2835,7 +2836,8 @@ ${text.slice(0, 8000)}`
 
   function styleEditableCellXml(cellXml, cell, row, width, rowHeight, variant = 'default', layoutCell = null) {
     const existingText = extractHwpxCellText(cellXml)
-    const isHeader = isTableHeaderCell(cell, row, existingText)
+    const cellStyle = tableCellStyle(cell, row, existingText)
+    const isHeader = cellStyle.highlight
     const align = cell.align || (isHeader ? 'center' : 'left')
     const paraPr = align === 'right'
       ? HWPX_STYLE.para.tableRight
@@ -2851,7 +2853,7 @@ ${text.slice(0, 8000)}`
     let xml = cellXml
     xml = xml.replace(/<hp:tc\b[^>]*>/, tag => {
       let next = tag
-      next = setAttrOnTag(next, 'header', isHeader ? '1' : '0')
+      next = setAttrOnTag(next, 'header', cellStyle.structuralHeader ? '1' : '0')
       next = setAttrOnTag(next, 'hasMargin', '0')
       next = setAttrOnTag(next, 'dirty', '1')
       next = setAttrOnTag(next, 'borderFillIDRef', borderFill)
@@ -2933,6 +2935,15 @@ ${text.slice(0, 8000)}`
     if (rowKind === 'keyValue') return isLikelyTableLabel(text)
     if (rowKind === 'header') return true
     return !!cell?.header
+  }
+
+  function tableCellStyle(cell, row = [], fallbackText = '') {
+    const rowKind = classifyTableRow(row)
+    const highlight = isTableHeaderCell(cell, row, fallbackText)
+    return {
+      highlight,
+      structuralHeader: rowKind === 'header' && highlight,
+    }
   }
 
   function classifyTableRow(row = []) {
@@ -3643,6 +3654,13 @@ ${text.slice(0, 8000)}`
         '</hh:borderFills>',
       ].join(''))
     }
+    if (!xml.includes(`<hh:borderFill id="${HWPX_STYLE.border.separator}"`)) {
+      xml = bumpItemCnt(xml, 'hh:borderFills', 1)
+      xml = xml.replace('</hh:borderFills>', [
+        separatorBorderFillXml(HWPX_STYLE.border.separator),
+        '</hh:borderFills>',
+      ].join(''))
+    }
     return xml
   }
 
@@ -3663,18 +3681,24 @@ ${text.slice(0, 8000)}`
     return `<hh:borderFill id="${id}" threeD="0" shadow="0" centerLine="NONE" breakCellSeparateLine="0"><hh:slash type="NONE" Crooked="0" isCounter="0"/><hh:backSlash type="NONE" Crooked="0" isCounter="0"/><hh:leftBorder type="SOLID" width="0.12 mm" color="#555555"/><hh:rightBorder type="SOLID" width="0.12 mm" color="#555555"/><hh:topBorder type="SOLID" width="0.12 mm" color="#555555"/><hh:bottomBorder type="SOLID" width="0.12 mm" color="#555555"/><hh:diagonal type="SOLID" width="0.1 mm" color="#000000"/><hc:fillBrush><hc:winBrush faceColor="${faceColor}" hatchColor="#FF000000" alpha="0"/></hc:fillBrush></hh:borderFill>`
   }
 
+  function separatorBorderFillXml(id) {
+    return `<hh:borderFill id="${id}" threeD="0" shadow="0" centerLine="NONE" breakCellSeparateLine="0"><hh:slash type="NONE" Crooked="0" isCounter="0"/><hh:backSlash type="NONE" Crooked="0" isCounter="0"/><hh:leftBorder type="NONE" width="0.1 mm" color="#CCCCCC"/><hh:rightBorder type="NONE" width="0.1 mm" color="#CCCCCC"/><hh:topBorder type="NONE" width="0.1 mm" color="#CCCCCC"/><hh:bottomBorder type="SOLID" width="0.18 mm" color="#999999"/><hh:diagonal type="NONE" width="0.1 mm" color="#CCCCCC"/><hc:fillBrush><hc:winBrush faceColor="#FFFFFF" hatchColor="#FF000000" alpha="0"/></hc:fillBrush></hh:borderFill>`
+  }
+
   function blocksToHwpxXml(blocks) {
     return blocks.map((block, index) => {
       if (block.type === 'table') return tableToHwpxXml(block, index)
       if (block.type === 'box') return boxToHwpxXml(block, index)
       if (block.type === 'hr') {
-        return paragraphXml('────────────────────────', HWPX_STYLE.para.title, HWPX_STYLE.char.body)
+        return separatorXml(index)
       }
       const tag = block.tag || 'p'
       const { paraPr, charPr } = paragraphStyleForBlock(block)
       const lines = splitTextLines(block.text)
-      if (lines.length <= 1) return paragraphXml(block.text || '', paraPr, charPr)
-      return lines.map(line => paragraphXml(line, paraPr, charPr)).join('')
+      const paragraph = lines.length <= 1
+        ? paragraphXml(block.text || '', paraPr, charPr)
+        : lines.map(line => paragraphXml(line, paraPr, charPr)).join('')
+      return tag === 'h2' ? paragraph + separatorXml(index, { compact: true }) : paragraph
     }).join('')
   }
 
@@ -3720,6 +3744,14 @@ ${text.slice(0, 8000)}`
     return `<hp:p paraPrIDRef="${paraPrIDRef}" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="${charPrIDRef}"><hp:t>${escapeXml(text)}</hp:t></hp:run></hp:p>`
   }
 
+  function separatorXml(index, options = {}) {
+    const width = 42520
+    const height = options.compact ? 80 : 120
+    const bottomMargin = options.compact ? 420 : 850
+    const tableId = 3000 + Number(index || 0)
+    return `<hp:p paraPrIDRef="${HWPX_STYLE.para.body}" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="${HWPX_STYLE.char.body}"><hp:tbl id="${tableId}" zOrder="0" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" pageBreak="CELL" repeatHeader="0" rowCnt="1" colCnt="1" cellSpacing="0" borderFillIDRef="${HWPX_STYLE.border.separator}" noAdjust="0"><hp:sz width="${width}" widthRelTo="ABSOLUTE" height="${height}" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="0" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="0" right="0" top="0" bottom="${bottomMargin}"/><hp:inMargin left="0" right="0" top="0" bottom="0"/><hp:tr><hp:tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="${HWPX_STYLE.border.separator}"><hp:subList textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="${width}" textHeight="${height}" hasTextRef="0" hasNumRef="0">${paragraphXml('', HWPX_STYLE.para.body, HWPX_STYLE.char.body)}</hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="${width}" height="${height}"/><hp:cellMargin left="0" right="0" top="0" bottom="0"/></hp:tc></hp:tr></hp:tbl></hp:run></hp:p>`
+  }
+
   function tableToHwpxXml(block, index) {
     const rows = block.rows || []
     if (!rows.length) return ''
@@ -3745,7 +3777,8 @@ ${text.slice(0, 8000)}`
       const cells = layoutRow.map(({ cell, colAddr, colspan, rowspan }) => {
         const width = Math.max(1800, sumColumnWidths(colWidths, colAddr, colspan))
         const height = spannedRowHeight(rowHeights, rowIndex, rowspan)
-        const isHeader = isTableHeaderCell(cell, row)
+        const cellStyle = tableCellStyle(cell, row)
+        const isHeader = cellStyle.highlight
         const borderFill = isHeader
           ? HWPX_STYLE.border.tableHeader
           : HWPX_STYLE.border.tableBody
@@ -3759,7 +3792,7 @@ ${text.slice(0, 8000)}`
         const margin = block.variant === 'sign'
           ? { left: 160, right: 160, top: 120, bottom: 120 }
           : { left: 500, right: 500, top: 180, bottom: 180 }
-        return `<hp:tc name="" header="${isHeader ? 1 : 0}" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="${borderFill}"><hp:subList textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="${Math.max(1, width - margin.left - margin.right)}" textHeight="${Math.max(1, height - margin.top - margin.bottom)}" hasTextRef="0" hasNumRef="0">${cellParas}</hp:subList><hp:cellAddr colAddr="${colAddr}" rowAddr="${rowIndex}"/><hp:cellSpan colSpan="${colspan}" rowSpan="${rowspan}"/><hp:cellSz width="${width}" height="${height}"/><hp:cellMargin left="${margin.left}" right="${margin.right}" top="${margin.top}" bottom="${margin.bottom}"/></hp:tc>`
+        return `<hp:tc name="" header="${cellStyle.structuralHeader ? 1 : 0}" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="${borderFill}"><hp:subList textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="${Math.max(1, width - margin.left - margin.right)}" textHeight="${Math.max(1, height - margin.top - margin.bottom)}" hasTextRef="0" hasNumRef="0">${cellParas}</hp:subList><hp:cellAddr colAddr="${colAddr}" rowAddr="${rowIndex}"/><hp:cellSpan colSpan="${colspan}" rowSpan="${rowspan}"/><hp:cellSz width="${width}" height="${height}"/><hp:cellMargin left="${margin.left}" right="${margin.right}" top="${margin.top}" bottom="${margin.bottom}"/></hp:tc>`
       }).join('')
       tableRows += `<hp:tr>${cells}</hp:tr>`
     })
