@@ -2653,7 +2653,7 @@ ${text.slice(0, 8000)}`
       const block = selectHtmlTableBlockForHwpx(tableXml, tableBlocks, usedTableBlocks)
       return block ? styleEditableTableXml(tableXml, block) : tableXml
     })
-    sectionXml = styleTemplateParagraphsXml(sectionXml)
+    sectionXml = styleTemplateParagraphsXml(sectionXml, html)
 
     zip.file('Contents/header.xml', ensureHwpxHeaderStyles(await headerFile.async('string')))
     zip.file('Contents/section0.xml', sectionXml)
@@ -2664,13 +2664,14 @@ ${text.slice(0, 8000)}`
     fs.writeFileSync(filePath, output)
   }
 
-  function styleTemplateParagraphsXml(sectionXml) {
+  function styleTemplateParagraphsXml(sectionXml, html = '') {
     const tables = []
     const protectedXml = sectionXml.replace(/<hp:tbl\b[\s\S]*?<\/hp:tbl>/g, tableXml => {
       const token = `@@TIDY_HWPX_TABLE_${tables.length}@@`
       tables.push(tableXml)
       return token
     })
+    const sourceStyles = extractParagraphStyleHints(html)
     let firstContentParagraph = true
     const styledXml = protectedXml.replace(/<hp:p\b[\s\S]*?<\/hp:p>/g, paragraphXml => {
       if (paragraphXml.includes('<hp:secPr') || paragraphXml.includes('<hp:tbl')) return paragraphXml
@@ -2682,9 +2683,12 @@ ${text.slice(0, 8000)}`
       ).replace(/\s+/g, ' ').trim()
       if (!text) return paragraphXml
 
-      let paraPr = HWPX_STYLE.para.body
-      let charPr = HWPX_STYLE.char.body
-      if (firstContentParagraph) {
+      const hinted = sourceStyles.get(normalizeStyleHintText(text))
+      let paraPr = hinted?.paraPr || HWPX_STYLE.para.body
+      let charPr = hinted?.charPr || HWPX_STYLE.char.body
+      if (hinted) {
+        firstContentParagraph = false
+      } else if (firstContentParagraph) {
         paraPr = HWPX_STYLE.para.title
         charPr = HWPX_STYLE.char.title
         firstContentParagraph = false
@@ -2705,6 +2709,21 @@ ${text.slice(0, 8000)}`
       return next
     })
     return styledXml.replace(/@@TIDY_HWPX_TABLE_(\d+)@@/g, (_token, index) => tables[Number(index)] || '')
+  }
+
+  function extractParagraphStyleHints(html) {
+    const hints = new Map()
+    for (const block of htmlToHwpxBlocks(html)) {
+      if (block.type !== 'p' && block.type !== 'box') continue
+      const key = normalizeStyleHintText(block.text)
+      if (!key || hints.has(key)) continue
+      hints.set(key, paragraphStyleForBlock(block))
+    }
+    return hints
+  }
+
+  function normalizeStyleHintText(text) {
+    return String(text || '').replace(/\s+/g, ' ').trim()
   }
 
   function isTemplateHeadingText(text) {
@@ -3326,13 +3345,16 @@ ${text.slice(0, 8000)}`
         const cellClasses = classList(cellNode)
         const header = isTag(cellNode, 'th')
         const text = textFromNode(cellNode)
+        const cellAlign = variant === 'sign'
+          ? 'center'
+          : htmlAlignFromNode(cellNode, emptyHtmlContext())
         cells.push({
           text,
           lines: splitTextLines(text),
           header,
           colspan: readSpan(attr(cellNode, 'colspan'), 'colspan'),
           rowspan: readSpan(attr(cellNode, 'rowspan'), 'rowspan'),
-          align: htmlAlignFromNode(cellNode, context),
+          align: cellAlign,
           bold: header || hasBoldIntent(cellNode, context),
           className: cellClasses.join(' '),
           widthPercent: readCssPercent(cellNode, 'width'),
@@ -3625,24 +3647,49 @@ ${text.slice(0, 8000)}`
         return paragraphXml('────────────────────────', HWPX_STYLE.para.title, HWPX_STYLE.char.body)
       }
       const tag = block.tag || 'p'
-      const className = String(block.className || '')
-      const isNoticeTitle = className.includes('notice-title') || className.includes('gong-header')
-      const isNoticeSub = className.includes('notice-sub')
-      const charPr = tag === 'h1' || isNoticeTitle ? HWPX_STYLE.char.title
-        : tag === 'h2' ? HWPX_STYLE.char.heading2
-        : tag === 'h3' ? HWPX_STYLE.char.heading3
-        : block.meta || isNoticeSub ? HWPX_STYLE.char.meta
-        : block.bold ? HWPX_STYLE.char.boldBody
-        : HWPX_STYLE.char.body
-      const paraPr = tag === 'h1' || isNoticeTitle || isNoticeSub || block.align === 'center' ? HWPX_STYLE.para.title
-        : block.align === 'right' ? HWPX_STYLE.para.right
-        : tag === 'h2' || tag === 'h3' ? HWPX_STYLE.para.heading
-        : tag === 'li' ? HWPX_STYLE.para.list
-        : HWPX_STYLE.para.body
+      const { paraPr, charPr } = paragraphStyleForBlock(block)
       const lines = splitTextLines(block.text)
       if (lines.length <= 1) return paragraphXml(block.text || '', paraPr, charPr)
       return lines.map(line => paragraphXml(line, paraPr, charPr)).join('')
     }).join('')
+  }
+
+  function paragraphStyleForBlock(block) {
+    const tag = block.tag || 'p'
+    const className = String(block.className || '')
+    const isMainTitle = tag === 'h1' || hasClassToken(className, 'notice-title') || hasClassToken(className, 'gong-header')
+    const isSubTitle = isTemplateSubtitleBlock(block)
+    const charPr = isMainTitle ? HWPX_STYLE.char.title
+      : tag === 'h2' ? HWPX_STYLE.char.heading2
+      : tag === 'h3' ? HWPX_STYLE.char.heading3
+      : block.meta || isSubTitle ? HWPX_STYLE.char.meta
+      : block.bold ? HWPX_STYLE.char.boldBody
+      : HWPX_STYLE.char.body
+    const paraPr = isMainTitle || isSubTitle ? HWPX_STYLE.para.title
+      : block.align === 'right' ? HWPX_STYLE.para.right
+      : tag === 'h2' || tag === 'h3' ? HWPX_STYLE.para.heading
+      : tag === 'li' ? HWPX_STYLE.para.list
+      : HWPX_STYLE.para.body
+    return { paraPr, charPr }
+  }
+
+  function isTemplateSubtitleBlock(block) {
+    const className = String(block.className || '')
+    if (hasClassToken(className, 'notice-sub')) return true
+    if (hasClassToken(className, 'center') && hasClassToken(className, 'meta')) return true
+    if (hasClassToken(className, 'center') && hasClassToken(className, 'bold') && normalizeStyleHintText(block.text).length <= 80) return true
+    if (!block.meta || block.align !== 'center') return false
+    return isLikelyDocumentSubtitleText(block.text)
+  }
+
+  function hasClassToken(className, token) {
+    return String(className || '').split(/\s+/).includes(token)
+  }
+
+  function isLikelyDocumentSubtitleText(text) {
+    const value = normalizeStyleHintText(text)
+    return value.length <= 140
+      && /(제안일|제안부서|제안자|작성일|작성부서|작성자|보고일자|보고부서|보고자|부제목|슬로건)/.test(value)
   }
 
   function paragraphXml(text, paraPrIDRef = HWPX_STYLE.para.body, charPrIDRef = HWPX_STYLE.char.body) {
