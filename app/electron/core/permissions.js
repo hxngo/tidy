@@ -52,7 +52,7 @@ function checkFullDiskAccess() {
  */
 async function showFullDiskAccessDialog(win, opts = {}) {
   const { response } = await dialog.showMessageBox(win, {
-    type: 'information',
+    type: 'info',
     icon: undefined,
     title: 'Tidy — 전체 디스크 접근 권한 필요',
     message: '알림 감지 기능이 비활성화되어 있습니다.',

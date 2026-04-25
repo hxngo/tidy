@@ -56,6 +56,12 @@ function isExternalBrowserUrl(rawUrl = '') {
   }
 }
 
+function getWindowIconPath() {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'icon.ico')
+    : path.join(__dirname, '../build/icon.ico')
+}
+
 // 앱 이름 설정 (dock, 메뉴바에 표시)
 app.setName('Tidy')
 
@@ -150,9 +156,7 @@ function createWindow() {
     backgroundColor: '#0f0f0f',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     trafficLightPosition: process.platform === 'darwin' ? { x: 12, y: 15 } : undefined,
-    icon: process.platform === 'darwin'
-      ? path.join(__dirname, '../build/icon.icns')
-      : path.join(__dirname, '../build/icon.ico'),
+    ...(process.platform === 'darwin' ? {} : { icon: getWindowIconPath() }),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
