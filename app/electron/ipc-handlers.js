@@ -2591,7 +2591,6 @@ ${text.slice(0, 8000)}`
       tableBody: 14,
       tableHeader: 15,
       tableSmall: 16,
-      separatorText: 17,
     },
     para: {
       title: 20,
@@ -2602,7 +2601,6 @@ ${text.slice(0, 8000)}`
       tableLeft: 25,
       tableCenter: 26,
       tableRight: 27,
-      separator: 28,
     },
     border: {
       tableBody: 4,
@@ -3634,13 +3632,6 @@ ${text.slice(0, 8000)}`
         '</hh:charProperties>',
       ].join(''))
     }
-    if (!xml.includes(`id="${HWPX_STYLE.char.separatorText}" height="700"`)) {
-      xml = bumpItemCnt(xml, 'hh:charProperties', 1)
-      xml = xml.replace('</hh:charProperties>', [
-        charPrXml(HWPX_STYLE.char.separatorText, 700, false, '#777777'),
-        '</hh:charProperties>',
-      ].join(''))
-    }
     if (!xml.includes(`id="${HWPX_STYLE.para.title}" tabPrIDRef="0"`)) {
       xml = bumpItemCnt(xml, 'hh:paraProperties', 5)
       xml = xml.replace('</hh:paraProperties>', [
@@ -3658,13 +3649,6 @@ ${text.slice(0, 8000)}`
         paraPrXml(HWPX_STYLE.para.tableLeft, 'LEFT', 0, 0, 0, 135),
         paraPrXml(HWPX_STYLE.para.tableCenter, 'CENTER', 0, 0, 0, 135),
         paraPrXml(HWPX_STYLE.para.tableRight, 'RIGHT', 0, 0, 0, 135),
-        '</hh:paraProperties>',
-      ].join(''))
-    }
-    if (!xml.includes(`id="${HWPX_STYLE.para.separator}" tabPrIDRef="0"`)) {
-      xml = bumpItemCnt(xml, 'hh:paraProperties', 1)
-      xml = xml.replace('</hh:paraProperties>', [
-        paraPrXml(HWPX_STYLE.para.separator, 'LEFT', 80, 180, 0, 100),
         '</hh:paraProperties>',
       ].join(''))
     }
@@ -3710,6 +3694,10 @@ ${text.slice(0, 8000)}`
 
   function blocksToHwpxXml(blocks) {
     const output = []
+    const sectionHeadingIndexes = blocks
+      .map((block, index) => isSectionDividerHeadingBlock(block) ? index : -1)
+      .filter(index => index >= 0)
+    const lastSectionHeadingIndex = sectionHeadingIndexes[sectionHeadingIndexes.length - 1] ?? -1
 
     blocks.forEach((block, index) => {
       if (block.type === 'table') {
@@ -3732,7 +3720,9 @@ ${text.slice(0, 8000)}`
         : lines.map(line => paragraphXml(line, paraPr, charPr)).join('')
       const isDividerHeading = isSectionDividerHeadingBlock(block)
       output.push(paragraph)
-      if (isDividerHeading) output.push(separatorXml(index, { compact: true }))
+      if (isDividerHeading && index !== lastSectionHeadingIndex) {
+        output.push(separatorXml(index, { compact: true }))
+      }
     })
 
     return output.join('')
@@ -3795,8 +3785,11 @@ ${text.slice(0, 8000)}`
   }
 
   function separatorXml(index, options = {}) {
-    const text = '─'.repeat(options.compact ? 44 : 48)
-    return paragraphXml(text, HWPX_STYLE.para.separator, HWPX_STYLE.char.separatorText)
+    const width = 42520
+    const height = options.compact ? 140 : 220
+    const bottomMargin = options.compact ? 420 : 850
+    const tableId = 3000 + Number(index || 0)
+    return `<hp:p paraPrIDRef="${HWPX_STYLE.para.body}" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="${HWPX_STYLE.char.body}"><hp:tbl id="${tableId}" zOrder="0" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" pageBreak="CELL" repeatHeader="0" rowCnt="1" colCnt="1" cellSpacing="0" borderFillIDRef="${HWPX_STYLE.border.separator}" noAdjust="0"><hp:sz width="${width}" widthRelTo="ABSOLUTE" height="${height}" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="0" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="0" right="0" top="0" bottom="${bottomMargin}"/><hp:inMargin left="0" right="0" top="0" bottom="0"/><hp:tr><hp:tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="${HWPX_STYLE.border.separator}"><hp:subList textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="${width}" textHeight="${height}" hasTextRef="0" hasNumRef="0">${paragraphXml(' ', HWPX_STYLE.para.body, HWPX_STYLE.char.body)}</hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="${width}" height="${height}"/><hp:cellMargin left="0" right="0" top="0" bottom="0"/></hp:tc></hp:tr></hp:tbl></hp:run></hp:p>`
   }
 
   function tableToHwpxXml(block, index) {
