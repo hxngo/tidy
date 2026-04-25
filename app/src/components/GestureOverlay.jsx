@@ -51,13 +51,30 @@ const LABELS = {
   four:      '4️⃣ 축소',
 }
 
+const GESTURE_GUIDE = [
+  { gesture: '주먹', action: '클릭', detail: '포인터 위치의 버튼이나 문서 본문을 선택합니다.' },
+  { gesture: '손바닥', action: '위로', detail: '현재 화면이나 문서 편집기를 위로 스크롤합니다.' },
+  { gesture: 'V 사인', action: '아래로', detail: '현재 화면이나 문서 편집기를 아래로 스크롤합니다.' },
+  { gesture: '엄지', action: '확인', detail: '현재 포커스된 입력이나 버튼에 Enter를 보냅니다.' },
+  { gesture: '손가락 3개', action: '확대', detail: '앱 화면 배율을 한 단계 키웁니다.' },
+  { gesture: '손가락 4개', action: '축소', detail: '앱 화면 배율을 한 단계 줄입니다.' },
+  { gesture: '좌우 이동', action: '스와이프', detail: '뷰어 페이지를 이전/다음으로 넘깁니다.' },
+]
+
+const CURSOR_HOLD_MS = 900
+const GESTURE_LOST_MS = 350
+const CURSOR_SMOOTHING = 0.42
+const HIDDEN_CURSOR = { x: -200, y: -200 }
+
 export default function GestureOverlay() {
   const [enabled, setEnabled]     = useState(false)
   const [status, setStatus]       = useState('idle')
   const [gesture, setGesture]     = useState(null)
-  const [cursor, setCursor]       = useState({ x: -200, y: -200 })
+  const [cursorVisible, setCursorVisible] = useState(false)
+  const [guideOpen, setGuideOpen] = useState(false)
 
   const videoRef    = useRef(null)
+  const cursorElRef = useRef(null)
   const overlayRef  = useRef(null)   // 전체화면 손 오버레이 캔버스
   const miniRef     = useRef(null)   // 우측 하단 미니 캔버스
   const rafRef      = useRef(null)
@@ -70,6 +87,9 @@ export default function GestureOverlay() {
   const lastFist    = useRef(0)
   const lastZoom    = useRef(0)
   const cursorRef   = useRef({ x: -200, y: -200 })
+  const lastSeenRef = useRef(0)
+  const cursorVisibleRef = useRef(false)
+  const lastGestureLabelRef = useRef(null)
 
   // ── WASM 경로: Electron file:// & dev http:// 양쪽 지원 ──────────────────
   function getBase() {
@@ -99,9 +119,9 @@ export default function GestureOverlay() {
       const opts = {
         runningMode: 'VIDEO',
         numHands: 1,
-        minHandDetectionConfidence: 0.5,
-        minHandPresenceConfidence: 0.5,
-        minTrackingConfidence: 0.5,
+        minHandDetectionConfidence: 0.45,
+        minHandPresenceConfidence: 0.35,
+        minTrackingConfidence: 0.35,
       }
 
       // GPU 먼저, 실패하면 같은 vision 인스턴스로 CPU 재시도
@@ -144,7 +164,35 @@ export default function GestureOverlay() {
     rafRef.current = null
     stream.current?.getTracks().forEach(t => t.stop())
     stream.current = null
+    hist.current = []
+    prevG.current = null
+    gCount.current = 0
+    lastSeenRef.current = 0
     if (videoRef.current) videoRef.current.srcObject = null
+  }
+
+  function moveCursor(point) {
+    cursorRef.current = point
+    const el = cursorElRef.current
+    if (el) el.style.transform = `translate3d(${point.x - 12}px, ${point.y - 12}px, 0)`
+  }
+
+  function showCursor() {
+    if (cursorVisibleRef.current) return
+    cursorVisibleRef.current = true
+    setCursorVisible(true)
+  }
+
+  function hideCursor() {
+    if (!cursorVisibleRef.current) return
+    cursorVisibleRef.current = false
+    setCursorVisible(false)
+  }
+
+  function updateGesture(label) {
+    if (lastGestureLabelRef.current === label) return
+    lastGestureLabelRef.current = label
+    setGesture(label)
   }
 
   const loop = useCallback(() => {
@@ -165,21 +213,45 @@ export default function GestureOverlay() {
     if (!res?.landmarks?.length) {
       if (oc) oc.getContext('2d').clearRect(0, 0, oc.width, oc.height)
       if (mc) mc.getContext('2d').clearRect(0, 0, mc.width, mc.height)
-      hist.current = []; prevG.current = null; gCount.current = 0
-      setCursor({ x: -200, y: -200 }); setGesture(null)
+      const lostFor = lastSeenRef.current ? ts - lastSeenRef.current : Infinity
+      if (lostFor <= CURSOR_HOLD_MS) {
+        if (lostFor > GESTURE_LOST_MS) {
+          prevG.current = null
+          gCount.current = 0
+          updateGesture(null)
+        }
+        return
+      }
+      hist.current = []
+      prevG.current = null
+      gCount.current = 0
+      hideCursor()
+      updateGesture(null)
       return
     }
 
+    const hadRecentHand = lastSeenRef.current && ts - lastSeenRef.current < CURSOR_HOLD_MS
+    lastSeenRef.current = ts
     const lm     = res.landmarks[0]
     const handed = res.handedness?.[0]?.[0]?.categoryName || 'Right'
     const isRight = handed === 'Right'
 
     // 커서 = 검지 끝 (landmark 8)
     const tip = lm[8]
-    const sx  = (1 - tip.x) * window.innerWidth
-    const sy  = tip.y * window.innerHeight
-    setCursor({ x: sx, y: sy })
-    cursorRef.current = { x: sx, y: sy }
+    const rawCursor = {
+      x: (1 - tip.x) * window.innerWidth,
+      y: tip.y * window.innerHeight,
+    }
+    const prevCursor = cursorRef.current
+    const shouldSmooth = hadRecentHand && prevCursor.x > -100 && prevCursor.y > -100
+    const nextCursor = shouldSmooth
+      ? {
+          x: prevCursor.x + (rawCursor.x - prevCursor.x) * CURSOR_SMOOTHING,
+          y: prevCursor.y + (rawCursor.y - prevCursor.y) * CURSOR_SMOOTHING,
+        }
+      : rawCursor
+    moveCursor(nextCursor)
+    showCursor()
 
     // 전체화면 손 그리기
     if (oc) drawHandFull(oc.getContext('2d'), lm, oc.width, oc.height)
@@ -202,7 +274,7 @@ export default function GestureOverlay() {
       const dir = detectSwipe(hist.current)
       if (dir) {
         lastSwipe.current = ts; hist.current = []
-        setGesture(`스와이프 ${dir==='left'?'←':'→'}`)
+        updateGesture(`스와이프 ${dir==='left'?'←':'→'}`)
         dispatch('swipe', { direction: dir })
         return
       }
@@ -218,8 +290,7 @@ export default function GestureOverlay() {
       if (g === 'fist') {
         if (ts - lastFist.current < 700) return
         lastFist.current = ts
-        const el = document.elementFromPoint(cursorRef.current.x, cursorRef.current.y)
-        if (el && typeof el.click === 'function') el.click()
+        clickAtPoint(cursorRef.current.x, cursorRef.current.y)
       }
       if (g === 'open_palm') scrollNearest(cursorRef.current.x, cursorRef.current.y, -160)
       if (g === 'victory')   scrollNearest(cursorRef.current.x, cursorRef.current.y,  160)
@@ -235,18 +306,94 @@ export default function GestureOverlay() {
         applyZoom(-0.1)
       }
       dispatch(g, {})
-      setGesture(LABELS[g] || g)
+      updateGesture(LABELS[g] || g)
     } else if (g) {
-      setGesture(LABELS[g])
+      updateGesture(LABELS[g])
     } else {
-      setGesture(null)
+      updateGesture(null)
     }
   }, [])
 
+  function resolvePoint(x, y) {
+    let doc = document
+    let win = window
+    let localX = x
+    let localY = y
+    let el = doc.elementFromPoint(localX, localY)
+
+    while (el?.tagName === 'IFRAME') {
+      try {
+        const frame = el
+        const rect = frame.getBoundingClientRect()
+        const nextDoc = frame.contentDocument
+        const nextWin = frame.contentWindow
+        if (!nextDoc || !nextWin) break
+        localX -= rect.left
+        localY -= rect.top
+        doc = nextDoc
+        win = nextWin
+        el = doc.elementFromPoint(localX, localY)
+      } catch {
+        break
+      }
+    }
+
+    return { doc, win, el, x: localX, y: localY }
+  }
+
+  function focusEditableAtPoint(target) {
+    const { doc, win, el, x, y } = target
+    const editable = el?.closest?.('[contenteditable="true"], [contenteditable=""]')
+    if (!editable) return
+    editable.focus?.()
+
+    let range = null
+    if (doc.caretPositionFromPoint) {
+      const pos = doc.caretPositionFromPoint(x, y)
+      if (pos) {
+        range = doc.createRange()
+        range.setStart(pos.offsetNode, pos.offset)
+      }
+    } else if (doc.caretRangeFromPoint) {
+      range = doc.caretRangeFromPoint(x, y)
+    }
+
+    if (range) {
+      range.collapse(true)
+      const selection = win.getSelection?.()
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+    }
+  }
+
+  function clickAtPoint(x, y) {
+    const target = resolvePoint(x, y)
+    const { win, el } = target
+    if (!el) return
+    focusEditableAtPoint(target)
+    for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+      const EventCtor = type.startsWith('pointer') && win.PointerEvent ? win.PointerEvent : win.MouseEvent
+      el.dispatchEvent(new EventCtor(type, {
+        bubbles: true,
+        cancelable: true,
+        clientX: target.x,
+        clientY: target.y,
+        button: 0,
+        buttons: type.endsWith('down') ? 1 : 0,
+        pointerId: 1,
+        pointerType: 'touch',
+        isPrimary: true,
+      }))
+    }
+  }
+
   function scrollNearest(x, y, delta) {
-    let el = document.elementFromPoint(x, y)
-    while (el && el !== document.body) {
-      const { overflowY } = window.getComputedStyle(el)
+    const target = resolvePoint(x, y)
+    let el = target.el
+    const doc = target.doc
+    const win = target.win
+    while (el && el !== doc.body && el !== doc.documentElement) {
+      const { overflowY } = win.getComputedStyle(el)
       const scrollable = overflowY === 'auto' || overflowY === 'scroll'
       if (scrollable && el.scrollHeight > el.clientHeight) {
         el.scrollBy({ top: delta, behavior: 'smooth' })
@@ -254,7 +401,12 @@ export default function GestureOverlay() {
       }
       el = el.parentElement
     }
-    window.scrollBy({ top: delta, behavior: 'smooth' })
+    const scrollingElement = doc.scrollingElement || doc.documentElement || doc.body
+    if (scrollingElement && scrollingElement.scrollHeight > scrollingElement.clientHeight) {
+      scrollingElement.scrollBy({ top: delta, behavior: 'smooth' })
+      return
+    }
+    win.scrollBy({ top: delta, behavior: 'smooth' })
   }
 
   function applyZoom(delta) {
@@ -341,7 +493,8 @@ export default function GestureOverlay() {
   useEffect(() => {
     if (!enabled) {
       stopAll(); setStatus('idle')
-      setCursor({ x:-200, y:-200 }); setGesture(null)
+      moveCursor(HIDDEN_CURSOR)
+      hideCursor(); updateGesture(null)
       const oc = overlayRef.current
       if (oc) oc.getContext('2d').clearRect(0, 0, oc.width, oc.height)
       return
@@ -379,11 +532,11 @@ export default function GestureOverlay() {
       />
 
       {/* 검지 커서 */}
-      {enabled && (
-        <div style={{
+      {enabled && cursorVisible && (
+        <div ref={cursorElRef} style={{
           position:      'fixed',
-          left:          cursor.x - 12,
-          top:           cursor.y - 12,
+          left:          0,
+          top:           0,
           width:         24,
           height:        24,
           borderRadius:  '50%',
@@ -392,7 +545,8 @@ export default function GestureOverlay() {
           pointerEvents: 'none',
           zIndex:        9995,
           boxShadow:     '0 0 12px rgba(99,102,241,0.5)',
-          transition:    'left 0.02s linear, top 0.02s linear',
+          transform:     `translate3d(${cursorRef.current.x - 12}px, ${cursorRef.current.y - 12}px, 0)`,
+          willChange:    'transform',
         }} />
       )}
 
@@ -456,6 +610,132 @@ export default function GestureOverlay() {
           )}
         </div>
       )}
+
+      {guideOpen && (
+        <div
+          onClick={() => setGuideOpen(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 10020,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+            background: 'rgba(0,0,0,0.62)',
+            backdropFilter: 'blur(5px)',
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              width: 430,
+              maxWidth: 'calc(100vw - 32px)',
+              maxHeight: 'calc(100vh - 48px)',
+              overflow: 'hidden',
+              borderRadius: 18,
+              border: '1px solid rgba(99,102,241,0.28)',
+              background: 'var(--card-bg)',
+              boxShadow: '0 24px 80px rgba(0,0,0,0.45)',
+            }}
+          >
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              padding: '16px 18px',
+              borderBottom: '1px solid #1a1c28',
+            }}>
+              <div>
+                <p style={{ margin: 0, fontSize: 13, color: '#e0e0f0', fontWeight: 650 }}>손 제스처</p>
+                <p style={{ margin: '4px 0 0', fontSize: 11, color: '#505272' }}>카메라 앞에서 손 모양을 3프레임 정도 유지하세요.</p>
+              </div>
+              <button
+                onClick={() => setGuideOpen(false)}
+                style={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: 8,
+                  border: '1px solid #1a1c28',
+                  background: '#0c0d14',
+                  color: '#73758f',
+                  cursor: 'pointer',
+                }}
+              >
+                ×
+              </button>
+            </div>
+            <div style={{ padding: 14, overflowY: 'auto', maxHeight: 'calc(100vh - 180px)' }}>
+              {GESTURE_GUIDE.map(item => (
+                <div
+                  key={`${item.gesture}-${item.action}`}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '82px 72px 1fr',
+                    gap: 10,
+                    alignItems: 'center',
+                    padding: '10px 8px',
+                    borderBottom: '1px solid #13141c',
+                  }}
+                >
+                  <span style={{ fontSize: 11, color: '#a5b4fc', fontWeight: 650 }}>{item.gesture}</span>
+                  <span style={{
+                    fontSize: 10,
+                    color: '#d8b4fe',
+                    border: '1px solid rgba(192,38,211,0.28)',
+                    background: 'rgba(192,38,211,0.10)',
+                    borderRadius: 999,
+                    padding: '3px 8px',
+                    textAlign: 'center',
+                  }}>
+                    {item.action}
+                  </span>
+                  <span style={{ fontSize: 11, color: '#73758f', lineHeight: 1.45 }}>{item.detail}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{
+              padding: '12px 18px',
+              borderTop: '1px solid #1a1c28',
+              fontSize: 10,
+              color: '#404060',
+              lineHeight: 1.5,
+            }}>
+              포인터가 문서 편집기 위에 있을 때도 클릭과 위/아래 스크롤이 iframe 내부까지 전달됩니다.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 도움말 버튼 */}
+      <button
+        onClick={() => setGuideOpen(true)}
+        title="손 제스처 보기"
+        style={{
+          position:   'fixed',
+          bottom:     16,
+          right:      60,
+          width:      36,
+          height:     36,
+          borderRadius: '50%',
+          border:     '1px solid #1a1c28',
+          background: 'var(--card-bg)',
+          color:      '#73758f',
+          cursor:     'pointer',
+          display:    'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex:     10000,
+          transition: 'all 0.2s',
+        }}
+      >
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="8" cy="8" r="6"/>
+          <path d="M6.6 6.2A1.6 1.6 0 118.4 7.8c-.7.35-.9.7-.9 1.2"/>
+          <path d="M8 12h.01"/>
+        </svg>
+      </button>
 
       {/* 토글 버튼 */}
       <button

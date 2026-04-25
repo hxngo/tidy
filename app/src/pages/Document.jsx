@@ -255,19 +255,27 @@ function TemplatePreview({ template, fileName, rawText, aiLoading }) {
 }
 
 // ─── WYSIWYG 편집 미리보기 — iframe body contentEditable ───────────────────
-const EditablePreview = forwardRef(function EditablePreview({ html, onSaveNewVersion, onUpdateCurrent }, ref) {
+const EditablePreview = forwardRef(function EditablePreview({
+  html,
+  versionLabel,
+  templateName,
+  isTemplateVersion,
+  onSaveNewVersion,
+  onUpdateCurrent,
+}, ref) {
   const iframeRef = useRef(null)
   const lastRangeRef = useRef(null)
   const [dirty, setDirty]     = useState(false)
   const [editable, setEditable] = useState(true)
 
-  function onIframeLoad() {
-    const doc = iframeRef.current?.contentDocument
+  function prepareEditorDocument(doc) {
     if (!doc) return
     const body = doc.body
+    if (!body) return
     body.contentEditable = editable ? 'true' : 'false'
     body.style.outline   = 'none'
     body.style.minHeight = '100%'
+    body.style.cursor = editable ? 'text' : 'default'
     body.addEventListener('input', () => setDirty(true))
     const captureSelection = () => {
       const sel = doc.getSelection?.()
@@ -285,10 +293,22 @@ const EditablePreview = forwardRef(function EditablePreview({ html, onSaveNewVer
     })
   }
 
+  function onIframeLoad() {
+    prepareEditorDocument(iframeRef.current?.contentDocument)
+  }
+
   useEffect(() => {
     const doc = iframeRef.current?.contentDocument
-    if (doc?.body) doc.body.contentEditable = editable ? 'true' : 'false'
+    if (doc?.body) {
+      doc.body.contentEditable = editable ? 'true' : 'false'
+      doc.body.style.cursor = editable ? 'text' : 'default'
+    }
   }, [editable])
+
+  useEffect(() => {
+    setDirty(false)
+    lastRangeRef.current = null
+  }, [html])
 
   function getCurrentHtml() {
     const doc = iframeRef.current?.contentDocument
@@ -316,6 +336,71 @@ const EditablePreview = forwardRef(function EditablePreview({ html, onSaveNewVer
     return sanitizeDocumentHtml('<!DOCTYPE html>' + doc.documentElement.outerHTML)
   }
 
+  function restoreSelection(doc) {
+    if (!doc || !lastRangeRef.current) return
+    const sel = doc.getSelection?.()
+    if (!sel) return
+    sel.removeAllRanges()
+    sel.addRange(lastRangeRef.current)
+  }
+
+  function runCommand(command, value = null) {
+    const frame = iframeRef.current
+    const doc = frame?.contentDocument
+    if (!doc) return
+    if (!editable) setEditable(true)
+    frame.contentWindow?.focus()
+    restoreSelection(doc)
+    doc.execCommand(command, false, value)
+    setDirty(true)
+  }
+
+  function insertHtmlAtCursor(fragmentHtml) {
+    const frame = iframeRef.current
+    const doc = frame?.contentDocument
+    if (!doc) return
+    if (!editable) setEditable(true)
+    frame.contentWindow?.focus()
+    restoreSelection(doc)
+    const sel = doc.getSelection?.()
+    const range = sel?.rangeCount ? sel.getRangeAt(0) : null
+    if (range) {
+      range.deleteContents()
+      range.insertNode(range.createContextualFragment(fragmentHtml))
+    } else {
+      doc.body.insertAdjacentHTML('beforeend', fragmentHtml)
+    }
+    setDirty(true)
+  }
+
+  function wrapSelectionWithStyle(styleText) {
+    const frame = iframeRef.current
+    const doc = frame?.contentDocument
+    const range = lastRangeRef.current
+    if (!doc || !range) return
+    if (!editable) setEditable(true)
+    frame.contentWindow?.focus()
+    restoreSelection(doc)
+    const span = doc.createElement('span')
+    span.setAttribute('style', styleText)
+    span.appendChild(range.extractContents())
+    range.insertNode(span)
+    setDirty(true)
+  }
+
+  function handleDiscard() {
+    const frame = iframeRef.current
+    const doc = frame?.contentDocument
+    if (doc) {
+      doc.open()
+      doc.write(sanitizeDocumentHtml(html))
+      doc.close()
+      prepareEditorDocument(doc)
+    }
+    lastRangeRef.current = null
+    setDirty(false)
+  }
+
   useImperativeHandle(ref, () => ({
     getCurrentHtml,
     isDirty: () => dirty,
@@ -336,11 +421,61 @@ const EditablePreview = forwardRef(function EditablePreview({ html, onSaveNewVer
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       {/* 편집 툴바 */}
-      <div className="flex-shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-[#13141c]"
+      <div className="flex-shrink-0 flex items-center gap-2 px-3 py-2 border-b border-[#13141c]"
         style={{ background: 'var(--card-bg)' }}>
-        <span className="text-[10px] text-[#505272]">
-          {editable ? '✎ 직접 수정 가능 — 내용을 클릭해서 편집하세요' : '🔒 읽기 전용'}
-        </span>
+        <div className="min-w-0">
+          <p className="text-[10px] text-[#9a9cb8] truncate">
+            {isTemplateVersion
+              ? `${templateName || '템플릿'} 적용 결과를 직접 수정할 수 있습니다`
+              : '문서를 직접 수정할 수 있습니다'}
+          </p>
+          <p className="text-[9px] text-[#404060] truncate">
+            {versionLabel || '현재 버전'} · 문서 본문을 클릭해 텍스트와 표 내용을 편집하세요
+          </p>
+        </div>
+        <div className="h-5 w-px bg-[#1a1c28]" />
+        <button
+          onClick={() => runCommand('bold')}
+          disabled={!editable}
+          className="w-7 h-7 rounded border border-[#1a1c28] text-[11px] font-bold text-[#9a9cb8] hover:text-[#e0e0f0] hover:border-[#252840] disabled:opacity-30"
+          title="굵게">
+          B
+        </button>
+        <button
+          onClick={() => wrapSelectionWithStyle('font-size:12pt;')}
+          disabled={!editable}
+          className="w-7 h-7 rounded border border-[#1a1c28] text-[10px] text-[#9a9cb8] hover:text-[#e0e0f0] hover:border-[#252840] disabled:opacity-30"
+          title="글씨 크게">
+          A+
+        </button>
+        {[
+          ['justifyLeft', 'L', '왼쪽 정렬'],
+          ['justifyCenter', 'C', '가운데 정렬'],
+          ['justifyRight', 'R', '오른쪽 정렬'],
+        ].map(([cmd, label, title]) => (
+          <button
+            key={cmd}
+            onClick={() => runCommand(cmd)}
+            disabled={!editable}
+            className="w-7 h-7 rounded border border-[#1a1c28] text-[10px] text-[#9a9cb8] hover:text-[#e0e0f0] hover:border-[#252840] disabled:opacity-30"
+            title={title}>
+            {label}
+          </button>
+        ))}
+        <button
+          onClick={() => insertHtmlAtCursor('<hr/>')}
+          disabled={!editable}
+          className="text-[10px] px-2 py-1.5 rounded border border-[#1a1c28] text-[#9a9cb8] hover:text-[#e0e0f0] hover:border-[#252840] disabled:opacity-30"
+          title="구분선 삽입">
+          선
+        </button>
+        <button
+          onClick={() => insertHtmlAtCursor('<table><tr><th>구분</th><th>내용</th><th>비고</th></tr><tr><td></td><td></td><td></td></tr></table>')}
+          disabled={!editable}
+          className="text-[10px] px-2 py-1.5 rounded border border-[#1a1c28] text-[#9a9cb8] hover:text-[#e0e0f0] hover:border-[#252840] disabled:opacity-30"
+          title="표 삽입">
+          표
+        </button>
         <div className="flex-1" />
         {dirty && (
           <span className="text-[10px] text-[#f59e0b]">● 저장되지 않음</span>
@@ -348,7 +483,13 @@ const EditablePreview = forwardRef(function EditablePreview({ html, onSaveNewVer
         <button
           onClick={() => setEditable(v => !v)}
           className="text-[10px] text-[#505272] hover:text-[#9a9cb8] px-2 py-1 transition-colors">
-          {editable ? '🔒 잠금' : '✎ 편집'}
+          {editable ? '잠금' : '수정하기'}
+        </button>
+        <button
+          onClick={handleDiscard}
+          disabled={!dirty}
+          className="text-[10px] px-2.5 py-1 rounded border border-[#1a1c28] text-[#9a9cb8] hover:text-[#e0e0f0] hover:border-[#252840] transition-colors disabled:opacity-40">
+          취소
         </button>
         <button
           onClick={handleSaveCurrent}
@@ -1209,7 +1350,12 @@ export default function Document() {
         return next
       })
       setViewMode('preview')
-      setNotice({ type: 'success', message: mode === 'template' ? `${tplName} 템플릿을 적용했습니다.` : '원본 구조를 유지해서 수정했습니다.' })
+      setNotice({
+        type: 'success',
+        message: mode === 'template'
+          ? `${tplName} 템플릿을 적용했습니다. 본문을 클릭하면 바로 추가 수정할 수 있습니다.`
+          : '원본 구조를 유지해서 수정했습니다. 본문을 클릭하면 바로 추가 수정할 수 있습니다.',
+      })
     } catch (e) { setError(e.message || 'AI 처리 실패') }
     finally { setAiLoading(false); setApplyingTemplateId(null) }
   }
@@ -1779,6 +1925,9 @@ export default function Document() {
               key={currentVersion?.id}
               ref={editablePreviewRef}
               html={currentHtml}
+              versionLabel={currentVersion?.label}
+              templateName={currentVersion?.tplName || currentTemplate.name}
+              isTemplateVersion={currentVersion?.mode === 'template'}
               onSaveNewVersion={(editedHtml) => {
                 const versionTemplateId = currentVersion?.templateId || templateId
                 const versionTemplateName = currentVersion?.tplName || findTemplate(versionTemplateId).name
@@ -1798,6 +1947,7 @@ export default function Document() {
                   setActiveVIdx(next.length - 1)
                   return next
                 })
+                setNotice({ type: 'success', message: '수정 내용을 새 버전으로 저장했습니다.' })
               }}
               onUpdateCurrent={(editedHtml) => {
                 setVersions(prev => prev.map((v, i) =>
@@ -1807,6 +1957,7 @@ export default function Document() {
                     ir: htmlToDocumentIr(editedHtml, plainTextFromHtml(editedHtml), { fileName, format: 'html' }),
                   } : v
                 ))
+                setNotice({ type: 'success', message: '현재 버전에 수정 내용을 저장했습니다.' })
               }}
             />
           )}
