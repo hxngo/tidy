@@ -398,6 +398,7 @@ export default function Document() {
   const [viewMode, setViewMode]         = useState('preview')// preview | source
   const [editableHtml, setEditableHtml] = useState('')
   const [aiLoading, setAiLoading]       = useState(false)
+  const [applyingTemplateId, setApplyingTemplateId] = useState(null)
   const [exporting, setExporting]       = useState(null)     // null | 'docx' | 'pdf'
   const [error, setError]               = useState(null)
   const [notice, setNotice]             = useState(null)
@@ -431,10 +432,19 @@ export default function Document() {
 
   const fileInputRef = useRef(null)
   const editablePreviewRef = useRef(null)
-  const currentTemplate = TEMPLATES.find(t => t.id === templateId) || TEMPLATES[0]
+  const findTemplate = (id) => TEMPLATES.find(t => t.id === id) || TEMPLATES[0]
+  const currentTemplate = findTemplate(templateId)
   const currentVersion  = versions[activeVIdx]
   const currentHtml     = currentVersion?.html || ''
   const hasVersions     = versions.length > 0
+
+  function activateVersion(index) {
+    const nextIndex = Number(index)
+    const version = versions[nextIndex]
+    setActiveVIdx(nextIndex)
+    setViewMode('preview')
+    if (version?.templateId) setTemplateId(version.templateId)
+  }
 
   // 소스 모드 전환 시 현재 HTML로 초기화
   useEffect(() => {
@@ -543,25 +553,39 @@ export default function Document() {
   }
 
   // ── AI 재편집 ───────────────────────────────────────────────────────────────
-  async function reorganize(overrideText, overrideSourceHtml) {
-    const text = overrideText ?? rawText
-    const sHtml = overrideSourceHtml ?? sourceHtml
+  async function reorganize(options = {}) {
+    const opts = options && typeof options === 'object' && !options.nativeEvent
+      ? options
+      : {}
+    const selectedTemplate = opts.template || findTemplate(opts.templateId || templateId)
+    const nextTemplateId = selectedTemplate.id
+    const text = String(opts.text ?? rawText)
+    const sHtml = opts.sourceHtml ?? sourceHtml
     if (!text.trim()) { setError('문서를 먼저 불러오세요'); return }
-    setAiLoading(true); setError(null)
+    setTemplateId(nextTemplateId)
+    setAiLoading(true); setApplyingTemplateId(nextTemplateId); setError(null); setNotice(null)
     try {
       const html = await window.tidy?.document.reorganize({
         text,
         sourceHtml: sHtml,
-        templateId,
+        templateId: nextTemplateId,
         instruction,
-        templateStructure: currentTemplate.structure,
-        templateCss:       currentTemplate.css,
-        templateName:      currentTemplate.name,
+        templateStructure: selectedTemplate.structure,
+        templateCss:       selectedTemplate.css,
+        templateName:      selectedTemplate.name,
       })
       if (!html) throw new Error('AI 응답 없음')
       const safeHtml = sanitizeDocumentHtml(html)
-      const tplName = TEMPLATES.find(t => t.id === templateId)?.name || templateId
-      const newVer = { id: String(Date.now()), label: '', html: safeHtml, createdAt: new Date(), tplName, instruction }
+      const tplName = selectedTemplate.name || nextTemplateId
+      const newVer = {
+        id: String(Date.now()),
+        label: '',
+        html: safeHtml,
+        createdAt: new Date(),
+        templateId: nextTemplateId,
+        tplName,
+        instruction,
+      }
       setVersions(prev => {
         const next = [...prev, newVer]
         next[next.length - 1].label = `v${next.length} — ${tplName}${instruction ? ` · ${instruction.slice(0,24)}` : ''}`
@@ -569,14 +593,24 @@ export default function Document() {
         return next
       })
       setViewMode('preview')
+      setNotice({ type: 'success', message: `${tplName} 템플릿을 적용했습니다.` })
     } catch (e) { setError(e.message || 'AI 처리 실패') }
-    finally { setAiLoading(false) }
+    finally { setAiLoading(false); setApplyingTemplateId(null) }
   }
 
   // ── 버전 관리 ───────────────────────────────────────────────────────────────
   function saveSourceEdit() {
     if (!editableHtml.trim()) return
-    const newVer = { id: String(Date.now()), label: '', html: sanitizeDocumentHtml(editableHtml), createdAt: new Date() }
+    const versionTemplateId = currentVersion?.templateId || templateId
+    const versionTemplateName = currentVersion?.tplName || findTemplate(versionTemplateId).name
+    const newVer = {
+      id: String(Date.now()),
+      label: '',
+      html: sanitizeDocumentHtml(editableHtml),
+      createdAt: new Date(),
+      templateId: versionTemplateId,
+      tplName: versionTemplateName,
+    }
     setVersions(prev => {
       const next = [...prev, newVer]
       next[next.length - 1].label = `v${next.length} — 직접 수정`
@@ -606,11 +640,13 @@ export default function Document() {
     if (!currentHtml) return
     setExporting('hwp'); setError(null); setNotice(null)
     try {
+      const exportTemplateId = currentVersion?.templateId || templateId
+      const exportTemplate = findTemplate(exportTemplateId)
       const result = await window.tidy?.document.exportHwp({
         html: getHtmlForExport(),
         fileName,
-        templateId,
-        templateName: currentTemplate.name,
+        templateId: exportTemplateId,
+        templateName: exportTemplate.name,
       })
       if (result?.success === false) return
       if (result?.engine === 'bundled-hwpx-js') {
@@ -691,7 +727,7 @@ export default function Document() {
               className="text-[11px] px-2.5 py-1.5 rounded-lg border border-[#1a1c28] bg-[#0c0d14] text-[#c8c8d8] placeholder:text-[#303248] focus:outline-none focus:border-[#353760] w-52"
             />
             <button
-              onClick={reorganize}
+              onClick={() => reorganize()}
               disabled={aiLoading || !rawText}
               className="flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-lg border border-[#353760] bg-[#1a1c30] text-[#a5b4fc] hover:bg-[#22244a] transition-colors disabled:opacity-40"
             >
@@ -709,7 +745,7 @@ export default function Document() {
         {hasVersions && (
           <select
             value={activeVIdx}
-            onChange={e => { setActiveVIdx(+e.target.value); setViewMode('preview') }}
+            onChange={e => activateVersion(e.target.value)}
             className="text-[10px] px-2 py-1.5 rounded-lg border border-[#1a1c28] bg-[#0c0d14] text-[#9a9cb8] focus:outline-none"
           >
             {versions.map((v, i) => (
@@ -795,6 +831,7 @@ export default function Document() {
               <div className="flex flex-col gap-2">
                 {TEMPLATES.map(t => {
                   const isSelected = templateId === t.id
+                  const isApplying = aiLoading && applyingTemplateId === t.id
                   const thumbHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
                     ${t.css}
                     * { pointer-events:none; }
@@ -836,12 +873,16 @@ export default function Document() {
                         <span className={`text-[10px] font-medium ${isSelected ? 'text-[#a5b4fc]' : 'text-[#6a6c84]'}`}>
                           {t.icon} {t.name}
                         </span>
-                        {isSelected && rawText && (
+                        {rawText && (
                           <button
-                            onClick={e => { e.stopPropagation(); reorganize() }}
+                            onClick={e => { e.stopPropagation(); reorganize({ template: t }) }}
                             disabled={aiLoading}
-                            className="text-[9px] px-2 py-0.5 rounded bg-[#6366f1] text-white hover:bg-[#5254cc] transition-colors disabled:opacity-50">
-                            {aiLoading ? '…' : '적용'}
+                            className={`text-[9px] px-2 py-0.5 rounded transition-colors disabled:opacity-50 ${
+                              isSelected
+                                ? 'bg-[#6366f1] text-white hover:bg-[#5254cc]'
+                                : 'border border-[#252840] text-[#6a6c84] hover:text-[#c8c8d8] hover:border-[#353760]'
+                            }`}>
+                            {isApplying ? '…' : '적용'}
                           </button>
                         )}
                       </div>
@@ -856,7 +897,7 @@ export default function Document() {
               <div className="px-3 pt-2 pb-3 border-t border-[#13141c] flex-1">
                 <p className="text-[9px] text-[#303248] uppercase tracking-widest mb-2 font-semibold">버전 이력</p>
                 {versions.map((v, i) => (
-                  <button key={v.id} onClick={() => { setActiveVIdx(i); setViewMode('preview') }}
+                  <button key={v.id} onClick={() => activateVersion(i)}
                     className={`w-full text-left px-2 py-1.5 rounded-lg mb-0.5 transition-colors text-[10px] leading-snug ${
                       activeVIdx === i
                         ? 'bg-[#1a1c30] text-[#a5b4fc]'
@@ -927,7 +968,16 @@ export default function Document() {
               ref={editablePreviewRef}
               html={currentHtml}
               onSaveNewVersion={(editedHtml) => {
-                const newVer = { id: String(Date.now()), label: '', html: sanitizeDocumentHtml(editedHtml), createdAt: new Date() }
+                const versionTemplateId = currentVersion?.templateId || templateId
+                const versionTemplateName = currentVersion?.tplName || findTemplate(versionTemplateId).name
+                const newVer = {
+                  id: String(Date.now()),
+                  label: '',
+                  html: sanitizeDocumentHtml(editedHtml),
+                  createdAt: new Date(),
+                  templateId: versionTemplateId,
+                  tplName: versionTemplateName,
+                }
                 setVersions(prev => {
                   const next = [...prev, newVer]
                   next[next.length - 1].label = `v${next.length} — 직접 수정`
