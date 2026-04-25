@@ -213,8 +213,18 @@ async function extractFromPdf(filePath) {
     // pdf-parse는 선택적 의존성으로 동적 로드
     const pdfParse = require('pdf-parse')
     const buffer = fs.readFileSync(filePath)
-    const data = await pdfParse(buffer)
-    return data.text.slice(0, 5000)
+    if (typeof pdfParse === 'function') {
+      const data = await pdfParse(buffer)
+      return (data.text || '').slice(0, 5000)
+    }
+
+    const parser = new pdfParse.PDFParse({ data: buffer })
+    try {
+      const data = await parser.getText()
+      return (data.text || '').slice(0, 5000)
+    } finally {
+      await parser.destroy?.()
+    }
   } catch (error) {
     if (error.code === 'MODULE_NOT_FOUND') {
       return `[PDF 파싱 불가] pdf-parse 모듈이 필요합니다: ${path.basename(filePath)}`

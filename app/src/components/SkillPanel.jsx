@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 
 // ─── AI 스킬 (로컬, 빠름) ──────────────────────────────────────
 export const AI_SKILLS = [
@@ -35,9 +36,24 @@ export const AI_SKILLS = [
     examples: ['팀 업무 방식 → 신규 입사자 가이드', '프로젝트 인수인계 문서', '툴·시스템 사용 안내'],
     tip: '기존 팀원한테 공유하던 내용을 붙여넣으면 바로 온보딩 문서로 변환해줘요.' },
   { id: 'hwp',        label: 'HWP',      icon: '文',  desc: 'HWP 공문서 형식으로 변환',    color: '#64748b', type: 'ai',
-    detail: '내용을 수신·발신·제목·본문·붙임 형식의 공문서 양식으로 변환하고 HWP 파일로 저장합니다.',
+    detail: '내용을 수신·발신·제목·본문·붙임 형식의 공문서 양식으로 변환하고 HWP 파일로 저장합니다. 개조식 규칙·Cheju Halla University 표기 자동 적용.',
     examples: ['업무 요청 → 공문서 변환', '협조 요청 공문 작성', '행정 문서 표준 양식화'],
     tip: '수신처·발신처·날짜를 함께 입력하면 완성도 높은 공문서가 만들어져요.' },
+  // Phase 2: anchor-filing
+  { id: 'filing',     label: '파일 분류', icon: '⊕',  desc: '파일을 프로젝트 폴더로 자동 분류', color: '#06b6d4', type: 'filing',
+    detail: '파일명·발신자·유형 기반 점수 알고리즘으로 적합한 폴더를 제안합니다. 앵커 사업단 폴더 구조를 기본으로 사용합니다.',
+    examples: ['교육부 수신 공문 → admin/official-docs/', '예산 집행 내역 → admin/budget/', '회의 녹취록 → meetings/'],
+    tip: '파일명, 발신자, 파일 유형을 함께 입력하면 더 정확한 폴더를 제안해요.' },
+  // Phase 3: anchor-agent
+  { id: 'agent',      label: '행정 에이전트', icon: '◎', desc: '출장보고서·공문·주간보고 자동 작성', color: '#a855f7', type: 'ai',
+    detail: '앵커 사업단 행정 업무를 자동화합니다. 출장보고서·공문 초안·주간보고 취합·예산 집행 분석·KPI 현황 보고를 개조식으로 작성합니다.',
+    examples: ['출장보고서: 출장지·기간·목적·결과 입력', '공문 초안: 수신처·제목·내용 요점 입력', '주간보고 취합: 본부별 실적 붙여넣기'],
+    tip: '"출장보고서 작성해줘", "공문 써줘", "주간보고 취합해줘" 처럼 자연어로 요청하세요.' },
+  // Phase 4: slides-html (visual-explainer)
+  { id: 'slides-html', label: '슬라이드 HTML', icon: '⧇', desc: '브라우저 발표자료 HTML 생성', color: '#2f4cb3', type: 'slides-html',
+    detail: '앵커 브랜드 색상(#2f4cb3, #4af2c8)으로 완성된 HTML 프레젠테이션을 생성합니다. 키보드 탐색·전체화면 지원. 외부 앱 불필요.',
+    examples: ['보고서 → 즉석 발표자료', '사업 현황 → 브리핑 슬라이드', '회의 내용 → 요약 프레젠테이션'],
+    tip: '생성 후 브라우저에서 F키로 전체화면, ←/→로 슬라이드 이동. Ctrl+P로 PDF 저장.' },
 ]
 
 // ─── NotebookLM 스킬 (클라우드, Google 계정 필요) ─────────────
@@ -99,9 +115,14 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
 
   const skill = skillDef || skillByIdWithCustom(skillId)
   const isNlm = skill.type === 'nlm'
+  const isFiling = skill.type === 'filing'
+  const isSlidesHtml = skillId === 'slides-html'
   const isTranslate = skillId === 'translate'
   const isSummary = skillId === 'summary'
   const isChatSkill = isTranslate || isSummary
+
+  // filing 파싱용 상태
+  const [filingResult, setFilingResult] = useState(null)
 
   // 대화 히스토리 (Claude API messages 형식, 서버 전송용)
   const [apiMessages, setApiMessages] = useState([])
@@ -161,12 +182,59 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
     setNlmResult(null)
     setNlmContent(null)
     setSetupStatus(null)
+    setFilingResult(null)
     setCopied(false)
     setSaved(false)
     setElapsed(0)
     clearInterval(elapsedTimerRef.current)
-    if (isNlm) {
+    if (isNlm || isSlidesHtml) {
       elapsedTimerRef.current = setInterval(() => setElapsed(s => s + 1), 1000)
+    }
+
+    // Phase 2: 파일 분류 스킬
+    if (isFiling) {
+      // input 형식: "파일명: xxx\n발신자: xxx\n유형: xxx" 또는 자유 텍스트
+      const lines = input.split('\n').filter(Boolean)
+      const fileInfo = {}
+      for (const line of lines) {
+        const m = line.match(/^(.+?)[:：]\s*(.+)$/)
+        if (!m) { if (!fileInfo.fileName) fileInfo.fileName = line.trim(); continue }
+        const key = m[1].trim().toLowerCase()
+        const val = m[2].trim()
+        if (key.includes('파일') || key.includes('file')) fileInfo.fileName = val
+        else if (key.includes('발신') || key.includes('sender') || key.includes('domain')) fileInfo.senderDomain = val
+        else if (key.includes('유형') || key.includes('type') || key.includes('확장')) fileInfo.fileType = val
+        else if (key.includes('설명') || key.includes('desc')) fileInfo.description = val
+      }
+      if (!fileInfo.fileName && lines.length > 0) fileInfo.fileName = lines[0]
+      window.tidy?.skills.runFiling(fileInfo)
+        .then(res => {
+          if (res?.success) {
+            setFilingResult(res)
+            setState('done-filing')
+          } else {
+            setOutput(res?.error || '분류 실패')
+            setState('error')
+          }
+        })
+        .catch(err => { setOutput(err.message); setState('error') })
+      return
+    }
+
+    // Phase 4: 슬라이드 HTML
+    if (isSlidesHtml) {
+      window.tidy?.skills.runSlidesHtml({ input, sourceItemId })
+        .then(res => {
+          if (res?.success) {
+            setOutput(`HTML 파일이 생성되어 브라우저에서 열렸습니다.\n\n저장 위치: ${res.filePath}`)
+            setState('done-slides-html')
+          } else {
+            setOutput(res?.error || '생성 실패')
+            setState('error')
+          }
+        })
+        .catch(err => { setOutput(err.message); setState('error') })
+      return
     }
 
     if (isNlm) {
@@ -239,6 +307,7 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
       setChatInput('')
       setChatLoading(false)
       setApiMessages([])
+      setFilingResult(null)
     }
   }, [open])
 
@@ -278,13 +347,13 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
 
   if (!open) return null
 
-  return (
+  return createPortal(
     <>
       {/* Backdrop */}
       <div className="fixed inset-0 z-40 bg-black/50 backdrop-blur-[2px]" onClick={onClose} />
 
       {/* Panel */}
-      <div className="fixed right-0 top-0 bottom-0 z-50 w-[480px] flex flex-col bg-[#0d0e16] border-l border-[#1c1e2c] shadow-2xl slide-in-right">
+      <div className="fixed right-0 top-11 bottom-0 z-50 w-[480px] flex flex-col bg-[#0d0e16] border-l border-[#1c1e2c] shadow-2xl slide-in-right">
 
         {/* Header */}
         <div className="flex items-center gap-3 px-5 pt-5 pb-4 border-b border-[#1c1e2c] flex-shrink-0">
@@ -428,7 +497,7 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
           )}
 
           {/* ── 실행 중 (AI) ── */}
-          {state === 'running' && !isNlm && (
+          {state === 'running' && !isNlm && !isSlidesHtml && (
             <div className="flex flex-col items-center justify-center h-48 gap-4">
               <div className="flex gap-1.5">
                 {[0, 1, 2].map(i => (
@@ -437,6 +506,22 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
                 ))}
               </div>
               <p className="text-[12px] text-[#6b6e8c]">AI가 {skill.label}을 생성하는 중…</p>
+            </div>
+          )}
+
+          {/* ── 실행 중 (슬라이드 HTML — Sonnet 사용으로 수십 초 소요) ── */}
+          {state === 'running' && isSlidesHtml && (
+            <div className="flex flex-col items-center justify-center h-48 gap-4">
+              <div className="w-10 h-10 rounded-full flex items-center justify-center animate-spin flex-shrink-0"
+                style={{ border: `2px solid ${skill.color}30`, borderTopColor: skill.color }}>
+              </div>
+              <div className="text-center">
+                <p className="text-[13px] font-semibold text-[#c0c2d8]">HTML 슬라이드 생성 중</p>
+                <p className="text-[11px] text-[#505272] mt-1">Claude Sonnet이 발표자료를 디자인하는 중입니다</p>
+                <p className="text-[14px] font-mono font-semibold mt-2" style={{ color: skill.color }}>
+                  {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}
+                </p>
+              </div>
             </div>
           )}
 
@@ -518,6 +603,33 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
           {state === 'done' && (
             <div className="prose prose-sm prose-invert max-w-none">
               <MarkdownOutput text={output} />
+            </div>
+          )}
+
+          {/* ── Phase 2: 파일 분류 결과 ── */}
+          {state === 'done-filing' && filingResult && (
+            <FilingResult result={filingResult} skill={skill} />
+          )}
+
+          {/* ── Phase 4: 슬라이드 HTML 완료 ── */}
+          {state === 'done-slides-html' && (
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center gap-3 p-4 rounded-xl bg-[#2f4cb3]/10 border border-[#2f4cb3]/30">
+                <div className="w-8 h-8 rounded-full bg-[#2f4cb3]/20 flex items-center justify-center flex-shrink-0">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#4af2c8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M2 8l4 4 8-7"/>
+                  </svg>
+                </div>
+                <div>
+                  <p className="text-[13px] font-semibold" style={{ color: '#4af2c8' }}>슬라이드 HTML 생성 완료</p>
+                  <p className="text-[11px] text-[#8892a0]">브라우저에서 열렸습니다 · F키 전체화면 · ←/→ 이동</p>
+                </div>
+              </div>
+              <div className="rounded-xl bg-[#12131e] border border-[#1c1e2c] p-3">
+                <p className="text-[10px] text-[#3a3c50] mb-1 uppercase tracking-wider">파일 위치</p>
+                <p className="text-[11px] text-[#6b6e8c] font-mono break-all">{output.split('\n').find(l => l.includes('/'))?.replace('저장 위치: ', '') || ''}</p>
+              </div>
+              <p className="text-[11px] text-[#505272]">브라우저에서 Ctrl+P → PDF로 저장하면 인쇄용 발표자료로 활용할 수 있어요.</p>
             </div>
           )}
 
@@ -615,7 +727,8 @@ export default function SkillPanel({ open, onClose, skillId, input, sourceItemId
           </div>
         )}
       </div>
-    </>
+    </>,
+    document.body
   )
 }
 
@@ -780,6 +893,102 @@ function SetupStep({ num, title, done, active, desc, action }) {
         </p>
         {action && <div className="mt-2">{action}</div>}
       </div>
+    </div>
+  )
+}
+
+// ─── Phase 2: 파일 분류 결과 컴포넌트 ────────────────────────
+function FilingResult({ result, skill }) {
+  const [copied, setCopied] = useState(false)
+  const confidence = result.confidence ?? 0
+  const confColor = confidence >= 80 ? '#10b981' : confidence >= 55 ? '#f59e0b' : '#ef4444'
+
+  function handleCopy() {
+    navigator.clipboard.writeText(result.path || '')
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      {/* 신뢰도 + 제안 경로 */}
+      <div className="rounded-xl border p-4 flex flex-col gap-3" style={{ borderColor: confColor + '40', background: confColor + '08' }}>
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: confColor }}>
+            {result.confidential ? '⚠ 기밀 파일' : result.needs_review ? '검토 필요' : '분류 완료'}
+          </span>
+          <span className="text-[13px] font-bold font-mono" style={{ color: confColor }}>{confidence}%</span>
+        </div>
+        {/* 신뢰도 바 */}
+        <div className="h-1.5 rounded-full bg-[#1a1c28] overflow-hidden">
+          <div className="h-full rounded-full transition-all duration-500" style={{ width: `${confidence}%`, background: confColor }} />
+        </div>
+        {/* 제안 경로 */}
+        <div className="flex items-center gap-2">
+          <code className="flex-1 text-[12px] font-mono text-[#e0e0f0] bg-[#12131e] rounded-lg px-3 py-2 break-all">
+            {result.path}
+          </code>
+          <button onClick={handleCopy} className="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center border border-[#1c1e2c] bg-[#14151e] hover:border-[#252840] transition-colors text-[#6b6e8c]">
+            {copied
+              ? <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#10b981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 8l4 4 8-7"/></svg>
+              : <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="5" width="9" height="9" rx="1"/><path d="M11 5V3a1 1 0 00-1-1H3a1 1 0 00-1 1v7a1 1 0 001 1h2"/></svg>
+            }
+          </button>
+        </div>
+        {/* 분류 근거 */}
+        {result.reason && (
+          <p className="text-[11px] text-[#8892a0]">{result.reason}</p>
+        )}
+      </div>
+
+      {/* 점수 breakdown */}
+      {result.score_breakdown && (
+        <div className="rounded-xl bg-[#12131e] border border-[#1c1e2c] p-3">
+          <p className="text-[10px] text-[#3a3c50] uppercase tracking-wider mb-2">점수 분석</p>
+          <div className="flex gap-3">
+            {[
+              { label: '발신자', key: 'sender', max: 3 },
+              { label: '키워드', key: 'keyword', max: 2 },
+              { label: '파일 유형', key: 'filetype', max: 1 },
+            ].map(({ label, key, max }) => {
+              const val = result.score_breakdown[key] ?? 0
+              return (
+                <div key={key} className="flex-1 flex flex-col items-center gap-1">
+                  <div className="text-[11px] font-mono font-semibold" style={{ color: val > 0 ? skill.color : '#3a3c50' }}>
+                    {val}/{max}
+                  </div>
+                  <div className="text-[10px] text-[#505272]">{label}</div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 대안 경로 */}
+      {result.alternatives?.length > 0 && (
+        <div className="rounded-xl bg-[#12131e] border border-[#1c1e2c] p-3">
+          <p className="text-[10px] text-[#3a3c50] uppercase tracking-wider mb-2">대안 경로</p>
+          <div className="flex flex-col gap-1.5">
+            {result.alternatives.map((alt, i) => (
+              <button
+                key={i}
+                onClick={() => navigator.clipboard.writeText(alt)}
+                className="text-left text-[11px] font-mono text-[#6b6e8c] hover:text-[#9a9cb8] px-2 py-1 rounded-lg hover:bg-[#1a1c28] transition-colors"
+              >
+                {alt}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {result.confidential && (
+        <div className="rounded-xl bg-red-900/20 border border-red-800/40 p-3">
+          <p className="text-[12px] text-red-400 font-medium">⚠ 개인정보 포함 의심</p>
+          <p className="text-[11px] text-red-300/60 mt-0.5">admin/confidential/ 폴더에 격리 후 담당자 확인이 필요합니다.</p>
+        </div>
+      )}
     </div>
   )
 }

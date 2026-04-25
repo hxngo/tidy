@@ -1,5 +1,6 @@
-const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification } = require('electron')
+const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification, shell } = require('electron')
 const path = require('path')
+const { spawn } = require('child_process')
 const { setupIpcHandlers } = require('./ipc-handlers')
 const { initVault, buildIndex } = require('./core/vault')
 const { initDb } = require('./core/db')
@@ -7,10 +8,53 @@ const { startScheduler, stopScheduler } = require('./core/scheduler')
 const { checkFullDiskAccess, showFullDiskAccessDialog } = require('./core/permissions')
 const store = require('./store')
 
+// ─── 마켓플레이스 서버 ────────────────────────────────────────────────────────
+let marketplaceProc = null
+
+function startMarketplaceServer() {
+  const serverDir = path.join(__dirname, '../../server')
+  marketplaceProc = spawn('node', ['index.js'], {
+    cwd: serverDir,
+    stdio: 'ignore',
+    detached: false,
+  })
+  marketplaceProc.on('error', () => {})
+  marketplaceProc.on('exit', (code) => {
+    marketplaceProc = null
+    // 앱 종료 중이 아니면 3초 후 재시작
+    if (!app.isQuitting) setTimeout(startMarketplaceServer, 3000)
+  })
+}
+
+function stopMarketplaceServer() {
+  if (marketplaceProc) {
+    marketplaceProc.kill()
+    marketplaceProc = null
+  }
+}
+
 // V8 힙 제한 — Electron 기본값(수 GB)에서 줄여 메모리 압력 완화
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=384')
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
+
+function isTrustedAppUrl(rawUrl = '') {
+  try {
+    const url = new URL(rawUrl)
+    return isDev ? url.origin === 'http://localhost:5173' : url.protocol === 'file:'
+  } catch {
+    return false
+  }
+}
+
+function isExternalBrowserUrl(rawUrl = '') {
+  try {
+    const url = new URL(rawUrl)
+    return url.protocol === 'https:' || url.protocol === 'http:'
+  } catch {
+    return false
+  }
+}
 
 // 앱 이름 설정 (dock, 메뉴바에 표시)
 app.setName('Tidy')
@@ -113,8 +157,14 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
+      webSecurity: true,
     },
+  })
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (isExternalBrowserUrl(url)) void shell.openExternal(url)
+    return { action: 'deny' }
   })
 
   if (isDev) {
@@ -206,9 +256,10 @@ function createWindow() {
 
 // 마이크 권한 자동 허용 (음성 입력용)
 app.on('web-contents-created', (_event, contents) => {
-  contents.session.setPermissionRequestHandler((_webContents, permission, callback) => {
-    if (permission === 'media' || permission === 'speechRecognition') return callback(true)
-    callback(false)
+  contents.session.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    const isAudioPermission = permission === 'media' || permission === 'speechRecognition'
+    const requestingUrl = details?.requestingUrl || details?.embeddingOrigin || webContents.getURL()
+    callback(isAudioPermission && isTrustedAppUrl(requestingUrl))
   })
 })
 
@@ -261,6 +312,9 @@ app.whenReady().then(async () => {
   // 스케줄러 시작 (창 없이도 백그라운드에서 메일/슬랙 체크)
   startScheduler(() => mainWindow)
 
+  // 마켓플레이스 서버 시작
+  startMarketplaceServer()
+
   app.on('activate', () => {
     // macOS: Dock 아이콘 클릭 시 창 다시 열기
     showWindow()
@@ -279,4 +333,5 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   app.isQuitting = true
   stopScheduler()
+  stopMarketplaceServer()
 })

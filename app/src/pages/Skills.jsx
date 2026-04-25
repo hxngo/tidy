@@ -209,16 +209,25 @@ function OutputViewer({ output, onClose }) {
 }
 
 // ─── 마켓 스킬 카드 ───────────────────────────────────────────
-function MarketSkillCard({ skill, installed, authorId, onInstall, onLike, likedIds }) {
+function MarketSkillCard({ skill, installed, authorId, onInstall, onLike, likedIds, onUnpublish }) {
   const isOwn    = skill.author_id === authorId
   const isLiked  = likedIds.has(skill.id)
   const [loading, setLoading] = useState(false)
+  const [unpublishing, setUnpublishing] = useState(false)
+  const [confirmUnpublish, setConfirmUnpublish] = useState(false)
 
   async function handleInstall() {
     if (installed || loading) return
     setLoading(true)
     await onInstall(skill.id)
     setLoading(false)
+  }
+
+  async function handleUnpublish() {
+    setUnpublishing(true)
+    await onUnpublish?.(skill.id)
+    setUnpublishing(false)
+    setConfirmUnpublish(false)
   }
 
   return (
@@ -232,8 +241,18 @@ function MarketSkillCard({ skill, installed, authorId, onInstall, onLike, likedI
           <p className="text-[12px] font-semibold text-[#d0d0e8] leading-tight truncate">{skill.label}</p>
           <p className="text-[10px] text-[#505272] mt-0.5 truncate">{skill.desc}</p>
         </div>
-        {isOwn && (
-          <span className="flex-shrink-0 text-[9px] text-[#c026d3] bg-[#c026d3]/10 border border-[#c026d3]/20 px-1.5 py-0.5 rounded-full">내 스킬</span>
+        {isOwn && !confirmUnpublish && (
+          <button
+            onClick={() => setConfirmUnpublish(true)}
+            className="flex-shrink-0 text-[9px] text-[#c026d3] bg-[#c026d3]/10 border border-[#c026d3]/20 px-1.5 py-0.5 rounded-full hover:bg-red-900/20 hover:text-red-400 hover:border-red-500/30 transition-colors"
+          >내 스킬</button>
+        )}
+        {confirmUnpublish && (
+          <div className="flex items-center gap-1 flex-shrink-0">
+            <span className="text-[9px] text-red-400">삭제?</span>
+            <button onClick={handleUnpublish} disabled={unpublishing} className="text-[9px] text-white bg-red-600 hover:bg-red-500 px-1.5 py-0.5 rounded transition-colors disabled:opacity-50">{unpublishing ? '…' : '확인'}</button>
+            <button onClick={() => setConfirmUnpublish(false)} className="text-[9px] text-[#505272] hover:text-[#9a9cb8] px-1 py-0.5 rounded transition-colors">취소</button>
+          </div>
         )}
       </div>
 
@@ -373,7 +392,7 @@ const SKILL_ICONS  = ['★','◈','▤','✦','⇄','◉','▷','◻','◫','⊞
 
 function CreateSkillModal({ skill, onClose, onSaved, onDeleted }) {
   const isEdit = !!skill
-  const [tab, setTab] = useState('nl')
+  const [tab, setTab] = useState(isEdit ? 'manual' : 'nl')
   const [nlDesc, setNlDesc]   = useState('')
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError] = useState('')
@@ -386,9 +405,11 @@ function CreateSkillModal({ skill, onClose, onSaved, onDeleted }) {
   const [examples, setExamples] = useState(Array.isArray(skill?.examples) ? skill.examples.join('\n') : '')
   const [tip, setTip]         = useState(skill?.tip || '')
   const [saving, setSaving]   = useState(false)
+  const [saveError, setSaveError] = useState('')
   const [confirmDel, setConfirmDel] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [showPublish, setShowPublish] = useState(false)
+  const [publishSuccess, setPublishSuccess] = useState(false)
 
   async function handleGenerate() {
     if (!nlDesc.trim()) return
@@ -413,16 +434,17 @@ function CreateSkillModal({ skill, onClose, onSaved, onDeleted }) {
 
   async function handleSave() {
     if (!label.trim() || !systemPrompt.trim()) return
-    setSaving(true)
+    setSaving(true); setSaveError('')
     try {
-      await window.tidy?.skills.saveCustom({
+      const res = await window.tidy?.skills.saveCustom({
         id: skill?.id || null, label: label.trim(), icon, color,
         desc: desc.trim(), detail: detail.trim(), systemPrompt: systemPrompt.trim(),
         examples: getExamplesArray(), tip: tip.trim(),
         type: 'custom', source: 'user',
       })
+      if (res?.error) { setSaveError(res.error); return }
       onSaved()
-    } catch (e) { alert('저장 실패: ' + e.message) }
+    } catch (e) { setSaveError(e.message) }
     finally { setSaving(false) }
   }
 
@@ -430,7 +452,7 @@ function CreateSkillModal({ skill, onClose, onSaved, onDeleted }) {
     if (!skill?.id) return
     setDeleting(true)
     try { await window.tidy?.skills.deleteCustom(skill.id); onDeleted() }
-    catch (e) { alert('삭제 실패: ' + e.message) }
+    catch (e) { setSaveError('삭제 실패: ' + e.message) }
     finally { setDeleting(false) }
   }
 
@@ -549,6 +571,12 @@ function CreateSkillModal({ skill, onClose, onSaved, onDeleted }) {
             </div>
           )}
         </div>
+        {saveError && (
+          <div className="mx-5 mb-1 px-3 py-2 bg-red-900/20 border border-red-700/30 rounded-lg text-[11px] text-red-400">{saveError}</div>
+        )}
+        {publishSuccess && (
+          <div className="mx-5 mb-1 px-3 py-2 bg-emerald-900/20 border border-emerald-700/30 rounded-lg text-[11px] text-emerald-400">마켓에 공유됐습니다!</div>
+        )}
         <div className="flex gap-2 px-5 pb-5 pt-3 border-t border-[#181a26] flex-shrink-0">
           {isEdit && (
             <>
@@ -563,7 +591,7 @@ function CreateSkillModal({ skill, onClose, onSaved, onDeleted }) {
               )}
             </>
           )}
-          {!confirmDel && tab === 'manual' && label.trim() && systemPrompt.trim() && (
+          {!confirmDel && isEdit && tab === 'manual' && label.trim() && systemPrompt.trim() && (
             <button onClick={() => setShowPublish(true)} className="px-3 py-2 text-[11px] text-[#c026d3] hover:text-[#e879f9] border border-[#c026d3]/30 hover:border-[#c026d3]/60 rounded-xl flex items-center gap-1.5">
               <IconShare size={10} /> 공유
             </button>
@@ -590,7 +618,7 @@ function CreateSkillModal({ skill, onClose, onSaved, onDeleted }) {
     </div>
     {showPublish && (
       <PublishModal skill={savedSkillObj} onClose={() => setShowPublish(false)}
-        onPublished={() => { setShowPublish(false); alert('마켓에 공유되었습니다! 🎉') }} />
+        onPublished={() => { setShowPublish(false); setPublishSuccess(true) }} />
     )}
     </>
   )
@@ -611,7 +639,7 @@ function MySkillsTab({ customSkills, onRefresh }) {
   const [hiddenSkills, setHiddenSkills]     = useState(new Set())  // 숨긴 기본 스킬 ID
   const [editMode, setEditMode]             = useState(false)      // 숨기기 편집 모드
 
-  const allSkills = [...AI_SKILLS, ...NLM_SKILLS]
+  const allSkills = [...AI_SKILLS, ...NLM_SKILLS, ...customSkills]
   const skillCounts = {}
   for (const o of outputs) skillCounts[o.skill_id] = (skillCounts[o.skill_id] || 0) + 1
 
@@ -666,8 +694,10 @@ function MySkillsTab({ customSkills, onRefresh }) {
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
+      {/* 스킬 그리드 (기본 + 커스텀) — 최대 절반 높이, 넘치면 자체 스크롤 */}
+      <div className="flex-shrink-0 overflow-y-auto" style={{ maxHeight: '52%' }}>
       {/* 빌트인 스킬 */}
-      <div className="flex-shrink-0 px-5 pt-5 pb-4 border-b border-[#13141c]">
+      <div className="px-5 pt-5 pb-4 border-b border-[#13141c]">
         <div className="flex items-center justify-between mb-3.5">
           <div>
             <h2 className="text-[13px] font-semibold text-[#e0e0f0]">기본 스킬</h2>
@@ -757,7 +787,7 @@ function MySkillsTab({ customSkills, onRefresh }) {
       </div>
 
       {/* 커스텀 스킬 */}
-      <div className="flex-shrink-0 px-5 py-3 border-b border-[#13141c]">
+      <div className="px-5 py-3 border-b border-[#13141c]">
         <div className="flex items-center justify-between mb-3">
           <div>
             <h2 className="text-[13px] font-semibold text-[#e0e0f0]">내 커스텀 스킬</h2>
@@ -832,7 +862,9 @@ function MySkillsTab({ customSkills, onRefresh }) {
         )}
       </div>
 
-      {/* 출력물 보관함 */}
+      </div>{/* end 스킬 그리드 */}
+
+      {/* 출력물 보관함 — 나머지 공간 전체 차지 */}
       <div className="flex-1 overflow-hidden flex flex-col">
         <div className="flex items-center gap-3 px-5 py-3 border-b border-[#13141c] flex-shrink-0">
           <h3 className="text-[12px] font-semibold text-[#8082a0] uppercase tracking-wide">출력물 보관함</h3>
@@ -963,6 +995,15 @@ function MarketplaceTab({ installedMarketIds, onInstalled }) {
     }
   }
 
+  async function handleUnpublish(id) {
+    const res = await window.tidy?.marketplace.unpublish(id)
+    if (res?.success) {
+      setSkills(prev => prev.filter(s => s.id !== id))
+    } else {
+      setError(res?.error || '삭제 실패')
+    }
+  }
+
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {/* 헤더 & 검색 */}
@@ -1048,6 +1089,7 @@ function MarketplaceTab({ installedMarketIds, onInstalled }) {
                   onInstall={handleInstall}
                   onLike={handleLike}
                   likedIds={likedIds}
+                  onUnpublish={handleUnpublish}
                 />
               ))}
             </div>

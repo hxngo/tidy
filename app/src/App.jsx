@@ -1,9 +1,10 @@
-import { useState, useEffect, createContext, useContext } from 'react'
+import { useState, useEffect, createContext } from 'react'
 import { HashRouter, Routes, Route, useNavigate } from 'react-router-dom'
 import { setCustomSkillsCache } from './components/SkillPanel.jsx'
 
 export const ThemeContext = createContext({ theme: 'auto', setTheme: () => {} })
 export const FontSizeContext = createContext({ fontSize: 1, setFontSize: () => {} })
+export const AIContext = createContext({ ctx: null, setCtx: () => {} })
 
 function useThemeManager() {
   const [theme, setTheme] = useState(() => localStorage.getItem('tidy-theme') || 'auto')
@@ -31,26 +32,17 @@ function useThemeManager() {
 }
 
 function useFontSizeManager() {
-  const [fontSize, setFontSize] = useState(() => parseFloat(localStorage.getItem('tidy-font-size') || '1'))
-
-  useEffect(() => {
-    const sizes = [8, 9, 10, 11, 12, 13, 14, 15, 16]
-    const css = sizes.map(px =>
-      `.text-\\[${px}px\\] { font-size: ${Math.round(px * fontSize)}px !important; }`
-    ).join('\n')
-
-    let style = document.getElementById('tidy-font-scale')
-    if (!style) {
-      style = document.createElement('style')
-      style.id = 'tidy-font-scale'
-      document.head.appendChild(style)
-    }
-    style.textContent = css
-  }, [fontSize])
+  const [fontSize, setFontSize] = useState(() => {
+    const saved = parseFloat(localStorage.getItem('tidy-font-size') || '1')
+    // 저장된 줌을 즉시 적용 (렌더러 레벨 줌 — 레이아웃에 영향 없음)
+    window.tidy?.app?.setZoom(saved)
+    return saved
+  })
 
   function updateFontSize(val) {
     const clamped = Math.min(1.4, Math.max(0.8, val))
     localStorage.setItem('tidy-font-size', String(clamped))
+    window.tidy?.app?.setZoom(clamped)
     setFontSize(clamped)
   }
 
@@ -67,13 +59,35 @@ import Calendar from './pages/Calendar.jsx'
 import Skills from './pages/Skills.jsx'
 import OrgAdmin from './pages/OrgAdmin.jsx'
 import FileDropZone from './components/FileDropZone.jsx'
+import Document from './pages/Document.jsx'
+import GestureOverlay from './components/GestureOverlay.jsx'
 
-function MainLayout() {
+function MainLayout({ setCtx }) {
   const [syncStatus, setSyncStatus] = useState({})
   const [newCount, setNewCount] = useState(0)
   const [urgentAlerts, setUrgentAlerts] = useState([])
   const [highlightItemId, setHighlightItemId] = useState(null)
   const navigate = useNavigate()
+
+  // 전역 키보드 캡처: INPUT/TEXTAREA/contenteditable 외부에서 출력 가능한 키를 누르면
+  // tidy:openCommandBar 커스텀 이벤트 발생
+  useEffect(() => {
+    function handleGlobalKey(e) {
+      // 메타/컨트롤 조합, 특수 키 제외
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      if (e.key.length !== 1) return
+      // 이미 포커스된 입력 요소에서는 무시
+      const active = document.activeElement
+      if (!active) return
+      const tag = active.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      if (active.isContentEditable) return
+      // 커맨드 바 열기 이벤트 발생
+      window.dispatchEvent(new CustomEvent('tidy:openCommandBar', { detail: { char: e.key } }))
+    }
+    window.addEventListener('keydown', handleGlobalKey)
+    return () => window.removeEventListener('keydown', handleGlobalKey)
+  }, [])
 
   // Dock 배지 업데이트
   useEffect(() => {
@@ -154,8 +168,10 @@ function MainLayout() {
           <Route path="/skills" element={<Skills />} />
           <Route path="/org" element={<OrgAdmin />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/document" element={<Document />} />
         </Routes>
       </div>
+      <GestureOverlay />
     </div>
     </FileDropZone>
   )
@@ -165,6 +181,7 @@ export default function App() {
   const [theme, setTheme] = useThemeManager()
   const [fontSize, setFontSize] = useFontSizeManager()
   const [onboardingDone, setOnboardingDone] = useState(null)
+  const [ctx, setCtx] = useState(null)
 
   // 전역 드래그앤드롭 방어: 파일을 앱에 드롭했을 때 Electron이 file:// URL로 이동해
   // 앱 화면이 검정/빈 화면으로 교체되는 것을 방지
@@ -182,6 +199,11 @@ export default function App() {
     window.tidy?.onboarding.get()
       .then((r) => setOnboardingDone(r?.done === true))
       .catch(() => setOnboardingDone(true))
+  }, [])
+
+  // 줌 초기 적용 (useState 초기화 시 window.tidy가 준비 안 됐을 경우 대비)
+  useEffect(() => {
+    window.tidy?.app?.setZoom(fontSize)
   }, [])
 
   // 커스텀 스킬 전역 캐시 초기 로드 — 앱 시작 시 한 번 로드해
@@ -211,9 +233,11 @@ export default function App() {
   return (
     <ThemeContext.Provider value={{ theme, setTheme }}>
       <FontSizeContext.Provider value={{ fontSize, setFontSize }}>
-        <HashRouter>
-          <MainLayout />
-        </HashRouter>
+        <AIContext.Provider value={{ ctx, setCtx }}>
+          <HashRouter>
+            <MainLayout setCtx={setCtx} />
+          </HashRouter>
+        </AIContext.Provider>
       </FontSizeContext.Provider>
     </ThemeContext.Provider>
   )

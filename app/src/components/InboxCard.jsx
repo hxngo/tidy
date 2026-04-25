@@ -1,20 +1,5 @@
-import { useState } from 'react'
-import SkillPanel, { AI_SKILLS } from './SkillPanel.jsx'
-
-// 인박스 카드 퀵 스킬 (가장 자주 쓰는 4개)
-const QUICK_SKILLS = [
-  { id: 'summary',   label: '요약',   color: '#6366f1' },
-  { id: 'translate', label: '번역',   color: '#0ea5e9' },
-  { id: 'minutes',   label: '회의록', color: '#8b5cf6' },
-  { id: 'report',    label: '보고서', color: '#3b82f6' },
-]
-
-// skill_hint → 버튼 정보
-const SKILL_HINT_BTN = {
-  hwp:     { label: 'HWP 공문서',  color: '#64748b', icon: '文' },
-  minutes: { label: '회의록',      color: '#8b5cf6', icon: '◉' },
-  summary: { label: '요약',        color: '#6366f1', icon: '✦' },
-}
+import { useState, useContext } from 'react'
+import { AIContext } from '../App.jsx'
 
 // ─── Category system ─────────────────────────────────────────────────────────
 
@@ -134,10 +119,16 @@ function canReply(source = '') {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function InboxCard({ item, sourceConfig, onMarkDone, onRestore, onDelete, onClick, customSkills = [] }) {
+export default function InboxCard({ item, sourceConfig, onMarkDone, onRestore, onDelete, onClick }) {
+  const { setCtx } = useContext(AIContext)
   const [checkedItems, setCheckedItems] = useState({})
   const [actionsExpanded, setActionsExpanded] = useState(false)
-  const [skillPanel, setSkillPanel] = useState({ open: false, skillId: null })
+
+  function openAI(e) {
+    e.stopPropagation()
+    setCtx({ type: 'inbox', item })
+    window.dispatchEvent(new CustomEvent('tidy:openCommandBar', { detail: { char: '' } }))
+  }
   // category가 'app'/'앱'이면 실제 앱 이름으로 교체
   const isAppCategory = item.category === 'app' || item.category === '앱'
   const appName = isAppCategory
@@ -287,75 +278,34 @@ export default function InboxCard({ item, sourceConfig, onMarkDone, onRestore, o
           </div>
         )}
 
-        {/* ── Skill hint (파일 타입 자동 감지) ── */}
-        {!isDone && item.skill_hint && SKILL_HINT_BTN[item.skill_hint] && (
+        {/* ── HWP 원본 열기 (파일 타입 힌트 보존) ── */}
+        {!isDone && item.skill_hint === 'hwp' && item.original_file_path && (
           <div className="flex items-center gap-2 mb-2.5">
             <button
-              onClick={(e) => {
-                e.stopPropagation()
-                setSkillPanel({ open: true, skillId: item.skill_hint })
-              }}
-              className="flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-lg border transition-colors font-medium"
-              style={{
-                color: SKILL_HINT_BTN[item.skill_hint].color,
-                background: SKILL_HINT_BTN[item.skill_hint].color + '18',
-                borderColor: SKILL_HINT_BTN[item.skill_hint].color + '40',
-              }}
+              onClick={(e) => { e.stopPropagation(); window.tidy?.skills.openHwpFile(item.original_file_path) }}
+              className="flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-lg border border-[#1c1e2c] hover:border-[#2a2c40] text-[#7a7c98] bg-[#14151e] transition-colors"
             >
-              <span>{SKILL_HINT_BTN[item.skill_hint].icon}</span>
-              <span>{SKILL_HINT_BTN[item.skill_hint].label}</span>
+              <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M7 2H3a1 1 0 00-1 1v10a1 1 0 001 1h10a1 1 0 001-1V9"/>
+                <path d="M10 1h5v5M15 1L8 8"/>
+              </svg>
+              한글에서 열기
             </button>
-
-            {/* HWP 원본 파일 열기 */}
-            {item.skill_hint === 'hwp' && item.original_file_path && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  window.tidy?.skills.openHwpFile(item.original_file_path)
-                }}
-                className="flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-lg border border-[#1c1e2c] hover:border-[#2a2c40] text-[#7a7c98] bg-[#14151e] transition-colors"
-              >
-                <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M7 2H3a1 1 0 00-1 1v10a1 1 0 001 1h10a1 1 0 001-1V9"/>
-                  <path d="M10 1h5v5M15 1L8 8"/>
-                </svg>
-                한글에서 열기
-              </button>
-            )}
           </div>
         )}
 
-        {/* ── Quick skill buttons ── */}
+        {/* ── AI 버튼 (단일) ── */}
         {!isDone && (
-          <div className={`flex items-center gap-1 mb-2 flex-wrap transition-opacity duration-150 opacity-0 group-hover:opacity-100`}>
-            {QUICK_SKILLS.map(skill => (
-              <button
-                key={skill.id}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setSkillPanel({ open: true, skillId: skill.id })
-                }}
-                className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md border border-[#1c1e2c] hover:border-[#2a2c40] transition-colors"
-                style={{ color: skill.color, background: skill.color + '12' }}
-              >
-                {skill.label}
-              </button>
-            ))}
-            {customSkills.slice(0, 3).map(skill => (
-              <button
-                key={skill.id}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setSkillPanel({ open: true, skillId: skill.id })
-                }}
-                className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md border transition-colors"
-                style={{ color: skill.color || '#c026d3', background: (skill.color || '#c026d3') + '12', borderColor: (skill.color || '#c026d3') + '30' }}
-                title={skill.desc || skill.label}
-              >
-                <span className="text-[9px]">{skill.icon || '★'}</span>
-                {skill.label}
-              </button>
-            ))}
+          <div className="flex items-center gap-1 mb-2 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+            <button
+              onClick={openAI}
+              className="flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-lg border border-[#c026d3]/30 bg-[#c026d3]/8 text-[#e879f9] hover:bg-[#c026d3]/15 hover:border-[#c026d3]/50 transition-colors font-medium"
+            >
+              <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 2L7 8H2l4 3-1.5 5L9 13l4.5 3L12 11l4-3H11L9 2z"/>
+              </svg>
+              AI
+            </button>
           </div>
         )}
 
@@ -414,14 +364,6 @@ export default function InboxCard({ item, sourceConfig, onMarkDone, onRestore, o
       </div>
     </div>
 
-    {/* Skill output panel */}
-    <SkillPanel
-      open={skillPanel.open}
-      onClose={() => setSkillPanel({ open: false, skillId: null })}
-      skillId={skillPanel.skillId}
-      input={item.summary || item.raw_text || ''}
-      sourceItemId={item.id}
-    />
   </>
   )
 }

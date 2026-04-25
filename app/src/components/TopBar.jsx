@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useContext } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import SkillPanel, { MarkdownOutput } from './SkillPanel'
+import { AIContext } from '../App.jsx'
 
 function Tooltip({ label, shortcut, children }) {
   const [visible, setVisible] = useState(false)
@@ -109,6 +110,13 @@ const Ic = {
       <path d="M6 15v-4h4v4"/>
     </svg>
   ),
+  document: (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 1.5H4a1 1 0 00-1 1v11a1 1 0 001 1h8a1 1 0 001-1V6L9 1.5z"/>
+      <path d="M9 1.5V6h4.5"/>
+      <path d="M5.5 9h5M5.5 11.5h3"/>
+    </svg>
+  ),
 }
 
 const NAV_ITEMS = [
@@ -116,11 +124,29 @@ const NAV_ITEMS = [
   { to: '/tasks', label: '태스크', icon: 'tasks' },
   { to: '/people', label: '인물', icon: 'people' },
   { to: '/calendar', label: '캘린더', icon: 'calendar' },
-  { to: '/skills', label: '스킬', icon: 'skills' },
-  { to: '/org', label: '조직 관리', icon: 'org' },
+  { to: '/document', label: '문서', icon: 'document' },
 ]
 
+// 명령 히스토리 — 패턴 감지용 (localStorage)
+const CMD_HISTORY_KEY = 'tidy-cmd-history'
+function loadCmdHistory() {
+  try { return JSON.parse(localStorage.getItem(CMD_HISTORY_KEY) || '[]') } catch { return [] }
+}
+function saveCmdHistory(entry) {
+  const history = loadCmdHistory()
+  const updated = [entry, ...history].slice(0, 50) // 최대 50개 보관
+  localStorage.setItem(CMD_HISTORY_KEY, JSON.stringify(updated))
+  return updated
+}
+function detectPattern(history, skillId) {
+  if (!skillId) return false
+  const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
+  const recent = history.filter(h => h.skillId === skillId && h.ts > oneWeekAgo)
+  return recent.length >= 3
+}
+
 export default function TopBar({ syncStatus = {}, newCount = 0, onNavigateToItem }) {
+  const { ctx } = useContext(AIContext)
   const [reportState, setReportState] = useState({ loading: false, report: null })
   const [showReport, setShowReport] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
@@ -128,6 +154,13 @@ export default function TopBar({ syncStatus = {}, newCount = 0, onNavigateToItem
   const [searchResults, setSearchResults] = useState(null)
   const [searchLoading, setSearchLoading] = useState(false)
   const [customSkillsForSearch, setCustomSkillsForSearch] = useState([])
+  // AI 명령 모드
+  const [aiMode, setAiMode] = useState(false)
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiResult, setAiResult] = useState(null)    // { output, usedSkill }
+  const [lastQuery, setLastQuery] = useState('')     // 마지막 실행 쿼리 (스킬 저장용)
+  // 스킬 저장 인라인 모달
+  const [saveSkillPanel, setSaveSkillPanel] = useState({ open: false, generating: false, skill: null })
   const searchInputRef = useRef(null)
   const searchTimerRef = useRef(null)
   const navigate = useNavigate()
@@ -141,13 +174,15 @@ export default function TopBar({ syncStatus = {}, newCount = 0, onNavigateToItem
   useEffect(() => {
     if (searchOpen) {
       setTimeout(() => searchInputRef.current?.focus(), 50)
-      // 검색창 열릴 때 커스텀 스킬 로드
       window.tidy?.skills.listCustom?.().then(list => {
         if (Array.isArray(list)) setCustomSkillsForSearch(list)
       }).catch(() => {})
     } else {
       setSearchQuery('')
       setSearchResults(null)
+      setAiMode(false)
+      setAiResult(null)
+      setSaveSkillPanel({ open: false, generating: false, skill: null })
     }
   }, [searchOpen])
 
@@ -159,12 +194,23 @@ export default function TopBar({ syncStatus = {}, newCount = 0, onNavigateToItem
       }
       if (e.key === 'Escape') setSearchOpen(false)
     }
+    function handleOpenCommandBar(e) {
+      setSearchOpen(true)
+      if (e.detail?.char) {
+        setSearchQuery(e.detail.char)
+      }
+    }
     window.addEventListener('keydown', handleKey)
-    return () => window.removeEventListener('keydown', handleKey)
+    window.addEventListener('tidy:openCommandBar', handleOpenCommandBar)
+    return () => {
+      window.removeEventListener('keydown', handleKey)
+      window.removeEventListener('tidy:openCommandBar', handleOpenCommandBar)
+    }
   }, [])
 
   function handleSearchInput(value) {
     setSearchQuery(value)
+    if (aiMode) { setAiMode(false); setAiResult(null); setSaveSkillPanel({ open: false, generating: false, skill: null }) }
     clearTimeout(searchTimerRef.current)
     if (!value.trim()) { setSearchResults(null); return }
     searchTimerRef.current = setTimeout(async () => {
@@ -175,6 +221,93 @@ export default function TopBar({ syncStatus = {}, newCount = 0, onNavigateToItem
       } catch {}
       setSearchLoading(false)
     }, 250)
+  }
+
+  function buildContextText(ctx) {
+    if (!ctx) return null
+    if (ctx.type === 'inbox' && ctx.item) {
+      return `[현재 선택된 인박스 아이템]\n제목: ${ctx.item.summary || ''}\n내용: ${(ctx.item.raw_text || '').slice(0, 800)}`
+    }
+    if (ctx.type === 'person' && ctx.person) {
+      return `[현재 선택된 인물]\n이름: ${ctx.person.name}\n조직: ${ctx.person.org || ''}\n역할: ${ctx.person.role || ''}`
+    }
+    if (ctx.type === 'task' && ctx.task) {
+      return `[현재 선택된 태스크]\n제목: ${ctx.task.title}\n상태: ${ctx.task.status || ''}`
+    }
+    return null
+  }
+
+  async function handleAiCommand() {
+    const q = searchQuery.trim()
+    if (!q) return
+    await handleAiCommandWith(q)
+  }
+
+  async function handleAiCommandWith(q) {
+    if (!q.trim()) return
+    setAiMode(true)
+    setAiLoading(true)
+    setAiResult(null)
+    setSaveSkillPanel({ open: false, generating: false, skill: null })
+    setLastQuery(q.trim())
+    let contextualQuery = q
+    if (ctx) {
+      const ctxText = buildContextText(ctx)
+      if (ctxText) contextualQuery = `${q}\n\n${ctxText}`
+    }
+    try {
+      const res = await window.tidy?.skills.command(contextualQuery)
+      if (res?.success) {
+        setAiResult({ output: res.output, usedSkill: res.usedSkill ?? null })
+        saveCmdHistory({ q, skillId: res.usedSkill?.id || null, ts: Date.now() })
+      } else {
+        setAiResult({ output: `오류: ${res?.error || '알 수 없는 오류'}`, usedSkill: null })
+      }
+    } catch (e) {
+      setAiResult({ output: `오류: ${e.message}`, usedSkill: null })
+    }
+    setAiLoading(false)
+  }
+
+  async function handleOpenSaveSkill() {
+    if (!lastQuery) return
+    setSaveSkillPanel({ open: true, generating: true, skill: null })
+    try {
+      const res = await window.tidy?.skills.generate({ description: lastQuery })
+      if (res?.skill) {
+        setSaveSkillPanel({ open: true, generating: false, skill: res.skill })
+      } else {
+        setSaveSkillPanel({ open: true, generating: false, skill: {
+          label: lastQuery.slice(0, 8),
+          icon: '⚡',
+          color: '#c026d3',
+          desc: lastQuery.slice(0, 30),
+          detail: '',
+          systemPrompt: lastQuery,
+        }})
+      }
+    } catch {
+      setSaveSkillPanel({ open: true, generating: false, skill: {
+        label: lastQuery.slice(0, 8),
+        icon: '⚡',
+        color: '#c026d3',
+        desc: lastQuery.slice(0, 30),
+        detail: '',
+        systemPrompt: lastQuery,
+      }})
+    }
+  }
+
+  async function handleConfirmSaveSkill() {
+    const { skill } = saveSkillPanel
+    if (!skill) return
+    const res = await window.tidy?.skills.saveCustom(skill)
+    if (res?.success) {
+      setSaveSkillPanel({ open: false, generating: false, skill: null })
+      window.tidy?.skills.listCustom?.().then(list => {
+        if (Array.isArray(list)) setCustomSkillsForSearch(list)
+      }).catch(() => {})
+    }
   }
 
   async function handleWeeklyReport() {
@@ -199,6 +332,35 @@ export default function TopBar({ syncStatus = {}, newCount = 0, onNavigateToItem
   const hasResults = (searchResults && (
     searchResults.items?.length > 0 || searchResults.tasks?.length > 0 || searchResults.people?.length > 0
   )) || matchedSkills.length > 0
+
+  // 퀵 액션 버튼 목록 (컨텍스트 기반)
+  const quickActions = []
+  if (ctx?.type === 'inbox' && ctx.item) {
+    quickActions.push(
+      { label: '요약', query: '이 항목 요약해줘' },
+      { label: '번역', query: '이 항목 영어로 번역해줘' },
+      { label: '답장 초안', query: '이 항목에 대한 답장 초안 작성해줘' },
+      { label: '회의록', query: '이 항목으로 회의록 작성해줘' },
+    )
+  } else if (ctx?.type === 'person' && ctx.person) {
+    quickActions.push(
+      { label: '타임라인 요약', query: `${ctx.person.name}과의 주요 이력 요약해줘` },
+      { label: '연락 초안', query: `${ctx.person.name}에게 보낼 메시지 초안 작성해줘` },
+    )
+  }
+  quickActions.push(
+    { label: '주간 보고서', query: '이번 주 활동 보고서 작성해줘' },
+    { label: '오늘 할 일', query: '오늘 처리해야 할 업무 정리해줘' },
+  )
+
+  // 컨텍스트 레이블
+  const ctxLabel = ctx?.type === 'inbox' && ctx.item
+    ? `인박스: ${ctx.item.summary?.slice(0, 40) || '선택된 항목'}`
+    : ctx?.type === 'person' && ctx.person
+      ? `인물: ${ctx.person.name}`
+      : ctx?.type === 'task' && ctx.task
+        ? `태스크: ${ctx.task.title}`
+        : null
 
   // 스킬 실행 패널 (검색에서)
   const [searchSkillPanel, setSearchSkillPanel] = useState({ open: false, skillId: null })
@@ -317,7 +479,7 @@ export default function TopBar({ syncStatus = {}, newCount = 0, onNavigateToItem
         </div>
       </header>
 
-      {/* Global Search Modal */}
+      {/* AI Command Bar Modal */}
       {searchOpen && (
         <div
           className="fixed inset-0 z-50 flex items-start justify-center pt-[80px] bg-black/60 backdrop-blur-sm"
@@ -327,19 +489,39 @@ export default function TopBar({ syncStatus = {}, newCount = 0, onNavigateToItem
             className="bg-[#0f1018] border border-[#1c1e2a] rounded-2xl w-full max-w-lg shadow-2xl fade-in"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Search input */}
+            {/* 입력창 */}
             <div className="flex items-center gap-3 px-4 py-3 border-b border-[#181a26]">
-              <span className="text-[#505272] flex-shrink-0">{Ic.search}</span>
+              {aiLoading ? (
+                <div className="flex gap-1 flex-shrink-0">
+                  {[0,1,2].map(i => (
+                    <div key={i} className="w-1.5 h-1.5 rounded-full bg-[#c026d3]/60 animate-pulse" style={{ animationDelay: `${i*150}ms` }} />
+                  ))}
+                </div>
+              ) : (
+                <span className="text-[#505272] flex-shrink-0">{Ic.search}</span>
+              )}
               <input
                 ref={searchInputRef}
                 value={searchQuery}
                 onChange={(e) => handleSearchInput(e.target.value)}
-                placeholder="인박스, 태스크, 인물 검색..."
+                onKeyDown={(e) => { if (e.key === 'Enter' && searchQuery.trim()) handleAiCommand() }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  const files = Array.from(e.dataTransfer.files)
+                  if (files.length > 0) {
+                    const paths = files.map(f => f.path).join(' ')
+                    const newQ = (searchQuery + ' ' + paths).trim()
+                    handleSearchInput(newQ)
+                    setTimeout(() => searchInputRef.current?.setSelectionRange(0, 0), 0)
+                  }
+                }}
+                onDragOver={(e) => e.preventDefault()}
+                placeholder="검색하거나 AI에게 명령하세요… 파일 드롭 가능  (Enter로 AI 실행)"
                 className="flex-1 bg-transparent text-[13px] text-[#d0d0e4] placeholder-[#3a3c58] focus:outline-none"
               />
               {searchQuery && (
                 <button
-                  onClick={() => { setSearchQuery(''); setSearchResults(null); searchInputRef.current?.focus() }}
+                  onClick={() => { setSearchQuery(''); setSearchResults(null); setAiMode(false); setAiResult(null); searchInputRef.current?.focus() }}
                   className="text-[#505272] hover:text-[#9a9cb8] flex-shrink-0"
                 >
                   {Ic.close}
@@ -347,111 +529,240 @@ export default function TopBar({ syncStatus = {}, newCount = 0, onNavigateToItem
               )}
             </div>
 
-            {/* Results */}
-            <div className="max-h-[400px] overflow-y-auto py-2">
-              {searchLoading && (
-                <div className="flex justify-center py-6">
-                  <div className="flex gap-1">
-                    {[0,1,2].map(i => (
-                      <div key={i} className="w-1.5 h-1.5 rounded-full bg-[#3a3c58] animate-pulse" style={{ animationDelay: `${i*150}ms` }} />
-                    ))}
+            {/* AI 결과 패널 */}
+            {aiMode && (
+              <div className="border-b border-[#181a26]">
+                {aiLoading ? (
+                  <div className="flex items-center gap-3 px-4 py-5">
+                    <div className="w-6 h-6 rounded-lg bg-[#c026d3]/10 flex items-center justify-center flex-shrink-0">
+                      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="#c026d3" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M9 2L7 8H2l4 3-1.5 5L9 13l4.5 3L12 11l4-3H11L9 2z"/>
+                      </svg>
+                    </div>
+                    <p className="text-[12px] text-[#505272] animate-pulse">AI가 명령을 처리하는 중…</p>
                   </div>
-                </div>
-              )}
-
-              {!searchLoading && searchQuery && !hasResults && (
-                <div className="text-center py-8">
-                  <p className="text-[13px] text-[#505272]">결과가 없습니다</p>
-                </div>
-              )}
-
-              {!searchLoading && hasResults && (
-                <>
-                  {searchResults.items?.length > 0 && (
-                    <div className="mb-2">
-                      <p className="text-[10px] text-[#505272] font-semibold uppercase tracking-widest px-4 py-1.5">인박스</p>
-                      {searchResults.items.map(item => (
-                        <button
-                          key={item.id}
-                          onClick={() => { setSearchOpen(false); onNavigateToItem?.(item.id) }}
-                          className="w-full text-left px-4 py-2 hover:bg-[#14151e] transition-colors"
-                        >
-                          <p className="text-[12px] text-[#c8c8d8] truncate">{item.summary || item.raw_text?.slice(0, 80)}</p>
-                          <p className="text-[10px] text-[#505272] mt-0.5">{item.source} · {item.category}</p>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-                  {searchResults.tasks?.length > 0 && (
-                    <div className="mb-2">
-                      <p className="text-[10px] text-[#505272] font-semibold uppercase tracking-widest px-4 py-1.5">태스크</p>
-                      {searchResults.tasks.map(task => (
-                        <button
-                          key={task.id}
-                          onClick={() => { setSearchOpen(false); navigate('/tasks') }}
-                          className="w-full text-left px-4 py-2 hover:bg-[#14151e] transition-colors"
-                        >
-                          <p className="text-[12px] text-[#c8c8d8] truncate">{task.title}</p>
-                          {task.due_date && (
-                            <p className="text-[10px] text-[#505272] mt-0.5">~{task.due_date.slice(0, 10)}</p>
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-                  {searchResults.people?.length > 0 && (
-                    <div className="mb-2">
-                      <p className="text-[10px] text-[#505272] font-semibold uppercase tracking-widest px-4 py-1.5">인물</p>
-                      {searchResults.people.map(person => (
-                        <button
-                          key={person.id}
-                          onClick={() => { setSearchOpen(false); navigate('/people') }}
-                          className="w-full text-left px-4 py-2 hover:bg-[#14151e] transition-colors"
-                        >
-                          <p className="text-[12px] text-[#c8c8d8]">{person.name}</p>
-                          {(person.org || person.role) && (
-                            <p className="text-[10px] text-[#505272] mt-0.5">{person.org}{person.role ? ` · ${person.role}` : ''}</p>
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </>
-              )}
-
-              {/* 커스텀 스킬 결과 */}
-              {!searchLoading && matchedSkills.length > 0 && (
-                <div className="mb-2">
-                  <p className="text-[10px] text-[#505272] font-semibold uppercase tracking-widest px-4 py-1.5">스킬</p>
-                  {matchedSkills.map(skill => (
-                    <button
-                      key={skill.id}
-                      onClick={() => { setSearchOpen(false); setSearchSkillPanel({ open: true, skillId: skill.id }) }}
-                      className="w-full text-left px-4 py-2 hover:bg-[#14151e] transition-colors flex items-center gap-2.5"
-                    >
-                      <span className="w-6 h-6 rounded-md flex items-center justify-center text-[11px] flex-shrink-0"
-                        style={{ background: (skill.color || '#c026d3') + '20', color: skill.color || '#c026d3' }}>
-                        {skill.icon || '★'}
-                      </span>
-                      <div>
-                        <p className="text-[12px] text-[#c8c8d8]">{skill.label}</p>
-                        {skill.desc && <p className="text-[10px] text-[#505272] mt-0.5">{skill.desc}</p>}
+                ) : aiResult && (
+                  <div className="px-4 py-4">
+                    {/* 사용된 스킬 배지 */}
+                    {aiResult.usedSkill && (
+                      <div className="flex items-center gap-1.5 mb-3">
+                        <span className="text-[9px] font-semibold uppercase tracking-widest text-[#505272]">사용된 스킬</span>
+                        <span className="text-[10px] bg-[#c026d3]/10 border border-[#c026d3]/25 text-[#e879f9] px-2 py-0.5 rounded-full">
+                          {aiResult.usedSkill.type === 'custom' ? '⚡ ' : ''}{aiResult.usedSkill.label}
+                        </span>
                       </div>
-                      <span className="ml-auto text-[9px] text-[#303050] bg-[#c026d3]/10 border border-[#c026d3]/20 px-1.5 py-0.5 rounded">커스텀</span>
-                    </button>
-                  ))}
-                </div>
-              )}
+                    )}
+                    {/* 결과 텍스트 */}
+                    <div className="max-h-[260px] overflow-y-auto">
+                      <MarkdownOutput text={aiResult.output} />
+                    </div>
 
-              {!searchQuery && (
-                <div className="text-center py-6">
-                  <p className="text-[12px] text-[#3a3c58]">인박스, 태스크, 인물, 스킬을 통합 검색합니다</p>
-                  <p className="text-[11px] text-[#2a2c40] mt-1">⌘F로 언제든 열기</p>
-                </div>
-              )}
-            </div>
+                    {/* 스킬 저장 버튼 / 인라인 저장 UI */}
+                    {!saveSkillPanel.open ? (
+                      <div className="mt-3 pt-3 border-t border-[#181a26] flex items-center gap-2">
+                        <button
+                          onClick={handleOpenSaveSkill}
+                          className="flex items-center gap-1.5 text-[10px] px-2.5 py-1.5 rounded-lg bg-[#c026d3]/8 border border-[#c026d3]/20 text-[#e879f9] hover:bg-[#c026d3]/15 transition-colors"
+                        >
+                          <svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M9 2L7 8H2l4 3-1.5 5L9 13l4.5 3L12 11l4-3H11L9 2z"/>
+                          </svg>
+                          스킬로 저장
+                        </button>
+                        <span className="text-[10px] text-[#3a3c50]">반복 작업이면 버튼 하나로 실행할 수 있어요</span>
+                      </div>
+                    ) : (
+                      <div className="mt-3 pt-3 border-t border-[#181a26]">
+                        {saveSkillPanel.generating ? (
+                          <div className="flex items-center gap-2 py-1">
+                            <div className="flex gap-1">
+                              {[0,1,2].map(i => <div key={i} className="w-1.5 h-1.5 rounded-full bg-[#c026d3]/60 animate-pulse" style={{ animationDelay: `${i*150}ms` }}/>)}
+                            </div>
+                            <span className="text-[11px] text-[#505272]">AI가 스킬 생성 중…</span>
+                          </div>
+                        ) : saveSkillPanel.skill && (
+                          <div className="space-y-2.5">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-8 h-8 rounded-lg flex items-center justify-center text-base flex-shrink-0"
+                                style={{ background: (saveSkillPanel.skill.color || '#c026d3') + '22' }}>
+                                {saveSkillPanel.skill.icon || '⚡'}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <input
+                                  value={saveSkillPanel.skill.label || ''}
+                                  onChange={e => setSaveSkillPanel(p => ({ ...p, skill: { ...p.skill, label: e.target.value } }))}
+                                  className="w-full bg-transparent text-[13px] font-semibold text-[#d0d0e4] focus:outline-none border-b border-[#252840] pb-0.5"
+                                  placeholder="스킬 이름"
+                                />
+                                <p className="text-[10px] text-[#505272] mt-0.5 truncate">{saveSkillPanel.skill.desc}</p>
+                              </div>
+                            </div>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => setSaveSkillPanel({ open: false, generating: false, skill: null })}
+                                className="flex-1 text-[11px] text-[#6b6e8c] py-1.5 rounded-lg border border-[#1a1c28] hover:border-[#252840] transition-colors"
+                              >취소</button>
+                              <button
+                                onClick={handleConfirmSaveSkill}
+                                disabled={!saveSkillPanel.skill.label?.trim()}
+                                className="flex-1 text-[11px] font-medium text-[#e879f9] py-1.5 rounded-lg bg-[#c026d3]/10 border border-[#c026d3]/25 hover:bg-[#c026d3]/18 transition-colors disabled:opacity-40"
+                              >저장</button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 검색 결과 (AI 모드 아닐 때) */}
+            {!aiMode && (
+              <div className="max-h-[400px] overflow-y-auto py-2">
+                {searchLoading && (
+                  <div className="flex justify-center py-6">
+                    <div className="flex gap-1">
+                      {[0,1,2].map(i => (
+                        <div key={i} className="w-1.5 h-1.5 rounded-full bg-[#3a3c58] animate-pulse" style={{ animationDelay: `${i*150}ms` }} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {!searchLoading && searchQuery && !hasResults && (
+                  <div className="text-center py-6">
+                    <p className="text-[13px] text-[#505272]">검색 결과 없음</p>
+                    <p className="text-[11px] text-[#2a2c40] mt-1">Enter를 누르면 AI에게 물어봅니다</p>
+                  </div>
+                )}
+
+                {!searchLoading && hasResults && (
+                  <>
+                    {searchResults?.items?.length > 0 && (
+                      <div className="mb-2">
+                        <p className="text-[10px] text-[#505272] font-semibold uppercase tracking-widest px-4 py-1.5">인박스</p>
+                        {searchResults.items.map(item => (
+                          <button
+                            key={item.id}
+                            onClick={() => { setSearchOpen(false); onNavigateToItem?.(item.id) }}
+                            className="w-full text-left px-4 py-2 hover:bg-[#14151e] transition-colors"
+                          >
+                            <p className="text-[12px] text-[#c8c8d8] truncate">{item.summary || item.raw_text?.slice(0, 80)}</p>
+                            <p className="text-[10px] text-[#505272] mt-0.5">{item.source} · {item.category}</p>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {searchResults?.tasks?.length > 0 && (
+                      <div className="mb-2">
+                        <p className="text-[10px] text-[#505272] font-semibold uppercase tracking-widest px-4 py-1.5">태스크</p>
+                        {searchResults.tasks.map(task => (
+                          <button
+                            key={task.id}
+                            onClick={() => { setSearchOpen(false); navigate('/tasks') }}
+                            className="w-full text-left px-4 py-2 hover:bg-[#14151e] transition-colors"
+                          >
+                            <p className="text-[12px] text-[#c8c8d8] truncate">{task.title}</p>
+                            {task.due_date && <p className="text-[10px] text-[#505272] mt-0.5">~{task.due_date.slice(0, 10)}</p>}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {searchResults?.people?.length > 0 && (
+                      <div className="mb-2">
+                        <p className="text-[10px] text-[#505272] font-semibold uppercase tracking-widest px-4 py-1.5">인물</p>
+                        {searchResults.people.map(person => (
+                          <button
+                            key={person.id}
+                            onClick={() => { setSearchOpen(false); navigate('/people') }}
+                            className="w-full text-left px-4 py-2 hover:bg-[#14151e] transition-colors"
+                          >
+                            <p className="text-[12px] text-[#c8c8d8]">{person.name}</p>
+                            {(person.org || person.role) && <p className="text-[10px] text-[#505272] mt-0.5">{person.org}{person.role ? ` · ${person.role}` : ''}</p>}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {matchedSkills.length > 0 && (
+                      <div className="mb-2">
+                        <p className="text-[10px] text-[#505272] font-semibold uppercase tracking-widest px-4 py-1.5">스킬</p>
+                        {matchedSkills.map(skill => (
+                          <button
+                            key={skill.id}
+                            onClick={() => { setSearchOpen(false); setSearchSkillPanel({ open: true, skillId: skill.id }) }}
+                            className="w-full text-left px-4 py-2 hover:bg-[#14151e] transition-colors flex items-center gap-2.5"
+                          >
+                            <span className="w-6 h-6 rounded-md flex items-center justify-center text-[11px] flex-shrink-0"
+                              style={{ background: (skill.color || '#c026d3') + '20', color: skill.color || '#c026d3' }}>
+                              {skill.icon || '★'}
+                            </span>
+                            <div>
+                              <p className="text-[12px] text-[#c8c8d8]">{skill.label}</p>
+                              {skill.desc && <p className="text-[10px] text-[#505272] mt-0.5">{skill.desc}</p>}
+                            </div>
+                            <span className="ml-auto text-[9px] text-[#303050] bg-[#c026d3]/10 border border-[#c026d3]/20 px-1.5 py-0.5 rounded">커스텀</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {!searchQuery && (
+                  <div className="px-4 py-3 space-y-3">
+                    {/* 컨텍스트 레이블 */}
+                    {ctxLabel && (
+                      <p className="text-[10px] text-[#505272]">현재 컨텍스트: {ctxLabel}</p>
+                    )}
+
+                    {/* 내 커스텀 스킬 */}
+                    {customSkillsForSearch.length > 0 && (
+                      <div>
+                        <p className="text-[10px] font-semibold text-[#505272] uppercase tracking-widest mb-1.5">내 스킬</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {customSkillsForSearch.slice(0, 8).map(skill => (
+                            <button
+                              key={skill.id}
+                              onClick={() => {
+                                const q = skill.systemPrompt || skill.desc || skill.label
+                                setSearchQuery(q)
+                                handleAiCommandWith(q)
+                              }}
+                              className="flex items-center gap-1.5 text-[11px] px-2.5 py-1.5 rounded-lg border border-[#c026d3]/20 text-[#e879f9] hover:bg-[#c026d3]/12 transition-colors"
+                              style={{ background: (skill.color || '#c026d3') + '10' }}
+                            >
+                              <span className="text-[12px]">{skill.icon || '⚡'}</span>
+                              {skill.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 퀵 액션 */}
+                    <div>
+                      {customSkillsForSearch.length > 0 && (
+                        <p className="text-[10px] font-semibold text-[#505272] uppercase tracking-widest mb-1.5">빠른 실행</p>
+                      )}
+                      <div className="flex flex-wrap gap-1.5">
+                        {quickActions.map(action => (
+                          <button
+                            key={action.label}
+                            onClick={() => { setSearchQuery(action.query); handleAiCommandWith(action.query) }}
+                            className="text-[11px] px-3 py-1.5 rounded-lg bg-[#13141c] border border-[#1c1e2a] text-[#9a9cb8] hover:bg-[#1c1e2a] hover:text-[#c8c8d8] transition-colors"
+                          >
+                            {action.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <p className="text-[11px] text-[#2a2c40]">타이핑 후 Enter → AI 자동 실행  ·  ⌘F로 열기</p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}

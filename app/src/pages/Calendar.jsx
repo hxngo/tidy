@@ -331,6 +331,87 @@ function DayPanel({ year, month, day, items, onClose }) {
   )
 }
 
+// ─── 검색 결과 뷰 ─────────────────────────────────────────────
+function SearchView({ query, allItems, onSelectDate }) {
+  const navigate = useNavigate()
+  const q = query.trim().toLowerCase()
+
+  const results = allItems
+    .filter(item => {
+      if (!q) return false
+      return (
+        item.summary?.toLowerCase().includes(q) ||
+        item.category?.toLowerCase().includes(q) ||
+        item.people?.some(p => p.toLowerCase().includes(q)) ||
+        item.source?.toLowerCase().includes(q) ||
+        (item.event_date || item.received_at?.slice(0, 10) || '').includes(q)
+      )
+    })
+    .sort((a, b) => {
+      const da = a.event_date || a.received_at?.slice(0, 10) || ''
+      const db = b.event_date || b.received_at?.slice(0, 10) || ''
+      return db.localeCompare(da)
+    })
+
+  if (!q) return null
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex-shrink-0 px-5 py-2.5 border-b border-[#1a1c2e]">
+        <span className="text-[11px] text-[#505272]">
+          {results.length > 0 ? `검색 결과 ${results.length}개` : '결과 없음'}
+        </span>
+      </div>
+      <div className="flex-1 overflow-y-auto min-h-0 p-4 space-y-2">
+        {results.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-40">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" className="text-[#2a2c40] mb-2">
+              <circle cx="11" cy="11" r="7"/><path d="M16.5 16.5L21 21"/>
+            </svg>
+            <p className="text-[12px] text-[#3d3f52]">"{query}"에 해당하는 일정이 없습니다</p>
+          </div>
+        ) : results.map(item => {
+          const dateStr = item.event_date || item.received_at?.slice(0, 10)
+          const [y, mo, da] = (dateStr || '').split('-').map(Number)
+          return (
+            <div
+              key={item.id}
+              onClick={() => {
+                if (y && mo && da) onSelectDate(y, mo - 1, da)
+                else navigate('/inbox')
+              }}
+              className="p-3 rounded-xl border border-[#1a1c2e] hover:border-[#252840] hover:bg-[#12131e] cursor-pointer transition-all"
+              style={{ borderLeft: `2px solid ${CATEGORY_COLOR[item.category] || '#475569'}` }}
+            >
+              <div className="flex items-start gap-2.5">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    {dateStr && (
+                      <span className="text-[10px] text-[#505272] font-medium">
+                        {mo}월 {da}일{item.event_time ? ` · ${formatTime(item.event_time)}` : ''}
+                      </span>
+                    )}
+                    {item.priority === 'high' && (
+                      <span className="text-[9px] text-red-400 font-bold uppercase tracking-widest">긴급</span>
+                    )}
+                  </div>
+                  <p className="text-[12px] text-[#c8cae8] leading-snug line-clamp-2">{item.summary}</p>
+                  {item.people?.length > 0 && (
+                    <p className="text-[10px] text-[#6b6e8c] mt-1">{item.people.join(', ')}</p>
+                  )}
+                </div>
+                <span className="text-[9px] text-[#3d3f52] bg-[#1a1c2e] px-1.5 py-0.5 rounded flex-shrink-0">
+                  {item.category || item.source || '기타'}
+                </span>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ─── 메인 Calendar 페이지 ─────────────────────────────────────
 export default function Calendar() {
   const t = today()
@@ -340,6 +421,7 @@ export default function Calendar() {
   const [selectedDay, setSelectedDay] = useState(t.day)
   const [items, setItems] = useState([])
   const [tasks, setTasks] = useState([])
+  const [search, setSearch] = useState('')
 
   // 아이템 로드
   useEffect(() => {
@@ -434,7 +516,29 @@ export default function Calendar() {
           </button>
         )}
 
-        <div className="flex-1" />
+        {/* 검색 */}
+        <div className="relative">
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Escape') setSearch('') }}
+            placeholder="일정 검색…"
+            className="bg-[#0d0e16] border border-[#1a1c2e] rounded-lg pl-7 pr-7 py-1.5 text-[12px] text-[#b8bacc] placeholder-[#2e3048] focus:outline-none focus:border-[#2a2c40] w-40 transition-colors"
+          />
+          <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#3a3c58] pointer-events-none" width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="6.5" cy="6.5" r="4.5"/><path d="M10 10l4 4"/>
+          </svg>
+          {search && (
+            <button
+              onClick={() => setSearch('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-[#3a3c58] hover:text-[#9a9cb8] transition-colors"
+            >
+              <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                <path d="M2 2l12 12M14 2L2 14"/>
+              </svg>
+            </button>
+          )}
+        </div>
 
         {/* 뷰 모드 토글 */}
         <div className="flex items-center bg-[#0e0f16] rounded-lg p-0.5 border border-[#1a1c2e]">
@@ -459,7 +563,17 @@ export default function Calendar() {
 
       {/* 콘텐츠 */}
       <div className="flex-1 overflow-hidden min-h-0">
-        {viewMode === 'month' ? (
+        {search.trim() ? (
+          <SearchView
+            query={search}
+            allItems={allItems}
+            onSelectDate={(y, mo, da) => {
+              setSearch('')
+              setYear(y); setMonth(mo); setSelectedDay(da)
+              setViewMode('month')
+            }}
+          />
+        ) : viewMode === 'month' ? (
           <div className="flex h-full">
             {/* 월 그리드 */}
             <div className={`${selectedDay ? 'flex-1' : 'w-full'} overflow-hidden transition-all`}>

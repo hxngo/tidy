@@ -1,16 +1,21 @@
 import { useState, useEffect, useContext } from 'react'
 import { ThemeContext, FontSizeContext } from '../App.jsx'
 import { IconMail, IconMessage, IconKakao, IconIMessage, IconFile, IconClose, SourceIcon } from '../components/Icons.jsx'
+import Skills from './Skills.jsx'
+import OrgAdmin from './OrgAdmin.jsx'
 
 const TABS = [
-  { id: 'ai', label: 'AI' },
-  { id: 'channels', label: '채널' },
-  { id: 'vault', label: '저장소' },
+  { id: 'general',       label: '일반' },
+  { id: 'ai',            label: 'AI' },
+  { id: 'profile',       label: '프로필' },
+  { id: 'channels',      label: '채널' },
+  { id: 'vault',         label: '저장소' },
   { id: 'notifications', label: '알림' },
-  { id: 'sources', label: '소스' },
-  { id: 'gdrive', label: 'Drive' },
-  { id: 'marketplace', label: '마켓' },
-  { id: 'backup', label: '백업' },
+  { id: 'sources',       label: '소스' },
+  { id: 'marketplace',   label: '마켓' },
+  { id: 'backup',        label: '백업' },
+  { id: 'skills',        label: '스킬' },
+  { id: 'org',           label: '조직' },
 ]
 
 const BUILTIN_SOURCE_IDS = new Set(['gmail', 'slack', 'kakao', 'imessage', 'file'])
@@ -30,7 +35,7 @@ function Toggle({ value, onChange }) {
 export default function Settings({ embedded = false }) {
   const { theme: currentTheme, setTheme } = useContext(ThemeContext)
   const { fontSize, setFontSize } = useContext(FontSizeContext)
-  const [tab, setTab] = useState('ai')
+  const [tab, setTab] = useState('general')
 
   const [settings, setSettings] = useState({
     hasAnthropicKey: false,
@@ -80,9 +85,10 @@ export default function Settings({ embedded = false }) {
   const [marketTestMsg, setMarketTestMsg]   = useState('')
 
   // 조직 설정 (org)
-  const [orgConfig, setOrgConfigState] = useState({ company: '', department: '', sharedVaultPath: '' })
+  const [orgConfig, setOrgConfigState] = useState({ company: '', department: '', sharedVaultPath: '', customGlossary: '', customFolders: [] })
   const [orgSaving, setOrgSaving] = useState(false)
   const [orgPickingFolder, setOrgPickingFolder] = useState(false)
+  const [orgFolderInput, setOrgFolderInput] = useState('')
 
   // 사용자 프로필 (Cold Start)
   const [userProfile, setUserProfile] = useState(null)
@@ -157,7 +163,7 @@ export default function Settings({ embedded = false }) {
       } catch { setProfileLoaded(true) }
       try {
         const org = await window.tidy?.org.getConfig?.()
-        if (org) setOrgConfigState(org)
+        if (org) setOrgConfigState(prev => ({ ...prev, ...org }))
       } catch {}
     }
     loadSettings()
@@ -256,16 +262,14 @@ export default function Settings({ embedded = false }) {
   }
 
   async function handleAddScanPath() {
-    const result = await window.tidy?.dialog.openFolder()
-    if (result?.canceled || !result?.paths?.length) return
-    const newPaths = [...new Set([...scanPaths, ...result.paths])]
+    const folder = await window.tidy?.dialog.openFolder()
+    if (!folder) return
+    const newPaths = [...new Set([...scanPaths, folder])]
     setScanPaths(newPaths)
     await window.tidy?.settings.save({ scanPaths: newPaths })
-    for (const p of result.paths) {
-      const preview = await window.tidy?.dialog.previewFolders(p)
-      if (preview?.folders?.length) setScanPreview((prev) => ({ ...prev, [p]: preview.folders }))
-    }
-    showFeedback('success', `${result.paths.length}개 경로 추가됨`)
+    const preview = await window.tidy?.dialog.previewFolders(folder)
+    if (preview?.folders?.length) setScanPreview((prev) => ({ ...prev, [folder]: preview.folders }))
+    showFeedback('success', '경로가 추가됐습니다')
   }
 
   async function handleRemoveScanPath(p) {
@@ -324,123 +328,124 @@ export default function Settings({ embedded = false }) {
         </div>
       )}
 
+      {(tab === 'skills' || tab === 'org') ? (
+        <div className="flex-1 overflow-hidden min-h-0">
+          {tab === 'skills' && <Skills />}
+          {tab === 'org' && <OrgAdmin />}
+        </div>
+      ) : (
       <div className="flex-1 overflow-y-auto overflow-x-hidden">
         <div className="w-full max-w-lg mx-auto px-6 py-5 space-y-6">
 
+          {/* ── 일반 탭 ── */}
+          {tab === 'general' && (
+            <div className="space-y-6">
+              {/* 테마 */}
+              <div>
+                <h2 className="text-sm font-semibold text-[#e5e5e5] mb-1">화면 테마</h2>
+                <p className="text-xs text-[#737373] mb-3">앱의 색상 테마를 선택합니다</p>
+                <div className="flex gap-2">
+                  {[
+                    { value: 'auto', label: '시스템', icon: '◐' },
+                    { value: 'dark', label: '다크',   icon: '●' },
+                    { value: 'light', label: '라이트', icon: '○' },
+                  ].map(({ value, label, icon }) => (
+                    <button
+                      key={value}
+                      onClick={() => setTheme(value)}
+                      className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-[13px] transition-colors ${
+                        currentTheme === value
+                          ? 'border-[#d4d4d8]/40 bg-[#d4d4d8]/10 text-[#d4d4d8]'
+                          : 'border-[#2a2a2a] text-[#737373] hover:text-[#9a9cb8] hover:border-[#3a3a3a]'
+                      }`}
+                    >
+                      <span className="text-[11px]">{icon}</span>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 글씨 크기 */}
+              <div>
+                <h2 className="text-sm font-semibold text-[#e5e5e5] mb-1">글씨 크기</h2>
+                <p className="text-xs text-[#737373] mb-3">앱 전체 텍스트 크기를 조절합니다</p>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setFontSize(fontSize - 0.1)}
+                    disabled={fontSize <= 0.8}
+                    className="w-7 h-7 rounded-lg border border-[#2a2a2a] text-[#9a9cb8] hover:border-[#3a3a3a] hover:text-white disabled:opacity-30 flex items-center justify-center text-base transition-colors"
+                  >−</button>
+                  <div className="flex-1 relative h-1.5 bg-[#2a2a2a] rounded-full">
+                    <div
+                      className="absolute left-0 top-0 h-full rounded-full bg-[#d4d4d8] transition-all"
+                      style={{ width: `${((fontSize - 0.8) / 0.6) * 100}%` }}
+                    />
+                    <input
+                      type="range"
+                      min={0.8} max={1.4} step={0.05}
+                      value={fontSize}
+                      onChange={e => setFontSize(parseFloat(e.target.value))}
+                      className="absolute inset-0 w-full opacity-0 cursor-pointer h-full"
+                    />
+                  </div>
+                  <button
+                    onClick={() => setFontSize(fontSize + 0.1)}
+                    disabled={fontSize >= 1.4}
+                    className="w-7 h-7 rounded-lg border border-[#2a2a2a] text-[#9a9cb8] hover:border-[#3a3a3a] hover:text-white disabled:opacity-30 flex items-center justify-center text-base transition-colors"
+                  >+</button>
+                  <span className="text-[12px] text-[#737373] w-10 text-right">{Math.round(fontSize * 100)}%</span>
+                  <button
+                    onClick={() => setFontSize(1)}
+                    className="text-[11px] text-[#505272] hover:text-[#9a9cb8] transition-colors"
+                  >초기화</button>
+                </div>
+                <div className="mt-3 px-3 py-2 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a]">
+                  <p className="text-[13px] text-[#9a9cb8]">미리보기 — 안녕하세요, Tidy입니다.</p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* ── AI 탭 ── */}
           {tab === 'ai' && (
-            <>
+            <div>
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <div className="flex-1 min-w-0">
+                  <h2 className="text-sm font-semibold text-[#e5e5e5]">Claude AI</h2>
+                  <p className="text-xs text-[#737373] mt-0.5">메시지 분류·요약·태스크 추출에 사용됩니다</p>
+                </div>
+                {settings.hasAnthropicKey && (
+                  <span className="text-xs text-green-400 bg-green-900/20 px-2 py-1 rounded-full border border-green-700/30 flex-shrink-0">✓ 연결됨</span>
+                )}
+              </div>
+              <form onSubmit={handleSaveApiKey} className="space-y-3">
+                <div>
+                  <input
+                    type="password"
+                    value={anthropicKey}
+                    onChange={(e) => setAnthropicKey(e.target.value)}
+                    placeholder={settings.hasAnthropicKey ? '새 API 키로 교체하려면 입력' : 'sk-ant-...'}
+                    className={inputCls}
+                  />
+                  <p className="text-xs text-[#404040] mt-1">console.anthropic.com에서 발급</p>
+                </div>
+                <button
+                  type="submit"
+                  disabled={!anthropicKey.trim() || saving}
+                  className="px-4 py-2 bg-[#d4d4d8] text-[#111111] text-sm rounded-lg hover:bg-[#b8b8c0] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  {saving ? '저장 중...' : '저장'}
+                </button>
+              </form>
+            </div>
+          )}
+
+          {/* ── 프로필 탭 ── */}
+          {tab === 'profile' && (
+            <div className="space-y-6">
+              {/* ── 내 프로필 ── */}
               <div>
-                <div className="flex items-center justify-between gap-3 mb-3">
-                  <div className="flex-1 min-w-0">
-                    <h2 className="text-sm font-semibold text-[#e5e5e5]">Claude AI</h2>
-                    <p className="text-xs text-[#737373] mt-0.5">메시지 분류·요약·태스크 추출에 사용됩니다</p>
-                  </div>
-                  {settings.hasAnthropicKey && (
-                    <span className="text-xs text-green-400 bg-green-900/20 px-2 py-1 rounded-full border border-green-700/30 flex-shrink-0">✓ 연결됨</span>
-                  )}
-                </div>
-                <form onSubmit={handleSaveApiKey} className="space-y-3">
-                  <div>
-                    <input
-                      type="password"
-                      value={anthropicKey}
-                      onChange={(e) => setAnthropicKey(e.target.value)}
-                      placeholder={settings.hasAnthropicKey ? '새 API 키로 교체하려면 입력' : 'sk-ant-...'}
-                      className={inputCls}
-                    />
-                    <p className="text-xs text-[#404040] mt-1">console.anthropic.com에서 발급</p>
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={!anthropicKey.trim() || saving}
-                    className="px-4 py-2 bg-[#d4d4d8] text-[#111111] text-sm rounded-lg hover:bg-[#b8b8c0] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                  >
-                    {saving ? '저장 중...' : '저장'}
-                  </button>
-                </form>
-              </div>
-
-              {/* ── 조직 설정 ── */}
-              <div className="pt-4 border-t border-[#2a2a2a]">
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <h2 className="text-sm font-semibold text-[#e5e5e5]">조직 설정</h2>
-                    <p className="text-xs text-[#737373] mt-0.5">전사·부서 공유 데이터 수신 설정</p>
-                  </div>
-                </div>
-                <div className="space-y-3">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[10px] text-[#737373] mb-1">회사명</label>
-                      <input
-                        value={orgConfig.company || ''}
-                        onChange={e => setOrgConfigState(p => ({ ...p, company: e.target.value }))}
-                        placeholder="주식회사 티디"
-                        className="w-full bg-[#141414] border border-[#2a2a2a] rounded-lg px-3 py-2 text-xs text-[#e5e5e5] placeholder-[#404040] focus:outline-none focus:border-white/30"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] text-[#737373] mb-1">소속 부서</label>
-                      <input
-                        value={orgConfig.department || ''}
-                        onChange={e => setOrgConfigState(p => ({ ...p, department: e.target.value }))}
-                        placeholder="개발팀"
-                        className="w-full bg-[#141414] border border-[#2a2a2a] rounded-lg px-3 py-2 text-xs text-[#e5e5e5] placeholder-[#404040] focus:outline-none focus:border-white/30"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] text-[#737373] mb-1">
-                      회사 공유 폴더 <span className="text-[#404040]">(Dropbox/NAS 등)</span>
-                    </label>
-                    <div className="flex gap-2">
-                      <input
-                        value={orgConfig.sharedVaultPath || ''}
-                        onChange={e => setOrgConfigState(p => ({ ...p, sharedVaultPath: e.target.value }))}
-                        placeholder="/Volumes/Company 또는 ~/Dropbox/TidyCompany"
-                        className="flex-1 bg-[#141414] border border-[#2a2a2a] rounded-lg px-3 py-2 text-xs text-[#e5e5e5] placeholder-[#404040] focus:outline-none focus:border-white/30 font-mono"
-                      />
-                      <button
-                        onClick={async () => {
-                          setOrgPickingFolder(true)
-                          try {
-                            const p = await window.tidy?.org.pickFolder()
-                            if (p) setOrgConfigState(prev => ({ ...prev, sharedVaultPath: p }))
-                          } finally { setOrgPickingFolder(false) }
-                        }}
-                        disabled={orgPickingFolder}
-                        className="px-2.5 py-1.5 bg-[#1a1a1a] border border-[#2a2a2a] text-[10px] text-[#737373] rounded-lg hover:text-[#e5e5e5] disabled:opacity-40 transition-colors whitespace-nowrap"
-                      >
-                        {orgPickingFolder ? '…' : '선택'}
-                      </button>
-                    </div>
-                    {orgConfig.sharedVaultPath && (
-                      <p className="text-[10px] text-[#555] mt-1">
-                        구조: company/inbox · company/tasks · departments/{orgConfig.department || '{부서명}'}/inbox
-                      </p>
-                    )}
-                  </div>
-                  <button
-                    onClick={async () => {
-                      setOrgSaving(true)
-                      try {
-                        await window.tidy?.org.setConfig(orgConfig)
-                        if (orgConfig.sharedVaultPath) await window.tidy?.org.initSharedVault(orgConfig.sharedVaultPath)
-                        showFeedback('success', '조직 설정이 저장됐습니다')
-                      } catch (e) { showFeedback('error', e.message) }
-                      finally { setOrgSaving(false) }
-                    }}
-                    disabled={orgSaving}
-                    className="w-full py-2 bg-[#1a1c28] border border-[#252840] text-[11px] text-[#818cf8] hover:bg-[#1e2035] hover:text-[#a5b4fc] rounded-lg transition-colors disabled:opacity-40"
-                  >
-                    {orgSaving ? '저장 중...' : '조직 설정 저장'}
-                  </button>
-                </div>
-              </div>
-
-              {/* ── 사용자 프로필 (Cold Start) ── */}
-              <div className="pt-4 border-t border-[#2a2a2a]">
                 <div className="flex items-center justify-between mb-3">
                   <div>
                     <h2 className="text-sm font-semibold text-[#e5e5e5]">내 프로필</h2>
@@ -522,9 +527,11 @@ export default function Settings({ embedded = false }) {
                           try {
                             const res = await window.tidy?.profile.save(profileDraft)
                             if (res?.success) {
-                              setUserProfile(res.profile || profileDraft)
+                              const saved = res.profile || profileDraft
+                              setUserProfile(saved)
                               setEditingProfile(false)
-                              showFeedback('ok', '프로필이 저장됐습니다')
+                              showFeedback('success', '프로필이 저장됐습니다')
+                              window.tidy?.profile.synthesize(saved)
                             } else showFeedback('error', res?.error || '저장 실패')
                           } catch (e) { showFeedback('error', e.message) }
                           finally { setProfileSaving(false) }
@@ -593,6 +600,16 @@ export default function Settings({ embedded = false }) {
                         </div>
                       </div>
                     )}
+                    {Array.isArray(userProfile.clients) && userProfile.clients.length > 0 && (
+                      <div className="p-2.5 bg-[#09090c] border border-[#1a1c28] rounded-lg">
+                        <p className="text-[9px] text-[#404060] uppercase tracking-wide mb-1.5">거래처</p>
+                        <div className="flex flex-wrap gap-1">
+                          {userProfile.clients.map(c => (
+                            <span key={c} className="text-[10px] text-[#c8c8d8] bg-[#1c1e2c] px-1.5 py-0.5 rounded">{c}</span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <button
                       onClick={async () => {
                         if (!window.confirm('온보딩을 다시 실행하면 현재 프로필이 초기화됩니다. 계속할까요?')) return
@@ -607,43 +624,143 @@ export default function Settings({ embedded = false }) {
                 )}
               </div>
 
-              <div className="pt-4 border-t border-[#2a2a2a] space-y-3">
-                <div>
-                  <p className="text-xs text-[#404040] mb-2">개발용 테스트</p>
-                  <textarea
-                    value={testText}
-                    onChange={(e) => setTestText(e.target.value)}
-                    rows={3}
-                    className="w-full bg-[#141414] border border-[#2a2a2a] rounded-lg px-3 py-2 text-xs text-[#e5e5e5] placeholder-[#404040] focus:outline-none focus:border-white/30 resize-none mb-2"
-                    placeholder="테스트할 메시지를 입력하세요..."
-                  />
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={async () => {
-                        const res = await window.tidy?.dev.injectTest({ text: testText || undefined, source: testSource })
-                        if (res?.success) showFeedback('success', '테스트 메시지 주입 완료 — 인박스 확인')
-                        else showFeedback('error', res?.error || '실패')
-                      }}
-                      className="px-3 py-1.5 bg-[#1a1a2e] border border-[#3a3a5a] text-[#8a8cb8] text-xs rounded-lg hover:border-[#6a6c98] hover:text-[#c8c8d0] transition-colors"
-                    >
-                      주입
-                    </button>
-                    <select
-                      value={testSource}
-                      onChange={(e) => setTestSource(e.target.value)}
-                      className="bg-[#141414] border border-[#2a2a2a] rounded-lg px-2 py-1.5 text-xs text-[#737373] focus:outline-none"
-                    >
-                      <option value="test">test</option>
-                      <option value="kakao">kakao</option>
-                      <option value="imessage">imessage</option>
-                      <option value="gmail">gmail</option>
-                      <option value="slack">slack</option>
-                    </select>
+              {/* ── 조직 설정 ── */}
+              <div className="pt-4 border-t border-[#2a2a2a]">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h2 className="text-sm font-semibold text-[#e5e5e5]">조직 설정</h2>
+                    <p className="text-xs text-[#737373] mt-0.5">전사·부서 공유 데이터 수신 설정</p>
                   </div>
                 </div>
-                <p className="text-xs text-[#404040]">Tidy v0.1.0 · MVP</p>
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[10px] text-[#737373] mb-1">회사명</label>
+                      <input
+                        value={orgConfig.company || ''}
+                        onChange={e => setOrgConfigState(p => ({ ...p, company: e.target.value }))}
+                        placeholder="주식회사 티디"
+                        className="w-full bg-[#141414] border border-[#2a2a2a] rounded-lg px-3 py-2 text-xs text-[#e5e5e5] placeholder-[#404040] focus:outline-none focus:border-white/30"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-[#737373] mb-1">소속 부서</label>
+                      <input
+                        value={orgConfig.department || ''}
+                        onChange={e => setOrgConfigState(p => ({ ...p, department: e.target.value }))}
+                        placeholder="개발팀"
+                        className="w-full bg-[#141414] border border-[#2a2a2a] rounded-lg px-3 py-2 text-xs text-[#e5e5e5] placeholder-[#404040] focus:outline-none focus:border-white/30"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-[#737373] mb-1">
+                      회사 공유 폴더 <span className="text-[#404040]">(Dropbox/NAS 등)</span>
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        value={orgConfig.sharedVaultPath || ''}
+                        onChange={e => setOrgConfigState(p => ({ ...p, sharedVaultPath: e.target.value }))}
+                        placeholder="/Volumes/Company 또는 ~/Dropbox/TidyCompany"
+                        className="flex-1 bg-[#141414] border border-[#2a2a2a] rounded-lg px-3 py-2 text-xs text-[#e5e5e5] placeholder-[#404040] focus:outline-none focus:border-white/30 font-mono"
+                      />
+                      <button
+                        onClick={async () => {
+                          setOrgPickingFolder(true)
+                          try {
+                            const p = await window.tidy?.org.pickFolder()
+                            if (p) setOrgConfigState(prev => ({ ...prev, sharedVaultPath: p }))
+                          } finally { setOrgPickingFolder(false) }
+                        }}
+                        disabled={orgPickingFolder}
+                        className="px-2.5 py-1.5 bg-[#1a1a1a] border border-[#2a2a2a] text-[10px] text-[#737373] rounded-lg hover:text-[#e5e5e5] disabled:opacity-40 transition-colors whitespace-nowrap"
+                      >
+                        {orgPickingFolder ? '…' : '선택'}
+                      </button>
+                    </div>
+                    {orgConfig.sharedVaultPath && (
+                      <p className="text-[10px] text-[#555] mt-1">
+                        구조: company/inbox · company/tasks · departments/{orgConfig.department || '{부서명}'}/inbox
+                      </p>
+                    )}
+                  </div>
+                  {/* 추가 용어집 */}
+                  <div>
+                    <label className="block text-[10px] text-[#737373] mb-1">
+                      추가 용어집 <span className="text-[#404040]">(번역·보고서 스킬에 적용)</span>
+                    </label>
+                    <textarea
+                      rows={4}
+                      placeholder={"예:\n런케이션 = Learncation\n사업단 = Project Office"}
+                      value={orgConfig.customGlossary || ''}
+                      onChange={e => setOrgConfigState(p => ({ ...p, customGlossary: e.target.value }))}
+                      className="w-full bg-[#141414] border border-[#2a2a2a] rounded-lg px-3 py-2 text-xs text-[#e5e5e5] placeholder-[#404040] focus:outline-none focus:border-white/30 resize-none font-mono"
+                    />
+                  </div>
+
+                  {/* 파일 분류 폴더 구조 */}
+                  <div>
+                    <label className="block text-[10px] text-[#737373] mb-1">
+                      파일 분류 폴더 <span className="text-[#404040]">(파일 분류 스킬에 적용)</span>
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="예: projects/my-project/"
+                        value={orgFolderInput}
+                        onChange={e => setOrgFolderInput(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter' && orgFolderInput.trim()) {
+                            setOrgConfigState(p => ({ ...p, customFolders: [...(p.customFolders || []), orgFolderInput.trim()] }))
+                            setOrgFolderInput('')
+                          }
+                        }}
+                        className="flex-1 bg-[#141414] border border-[#2a2a2a] rounded-lg px-3 py-2 text-xs text-[#e5e5e5] placeholder-[#404040] focus:outline-none focus:border-white/30 font-mono"
+                      />
+                      <button
+                        onClick={() => {
+                          if (!orgFolderInput.trim()) return
+                          setOrgConfigState(p => ({ ...p, customFolders: [...(p.customFolders || []), orgFolderInput.trim()] }))
+                          setOrgFolderInput('')
+                        }}
+                        className="px-3 py-2 bg-[#141414] border border-[#2a2a2a] text-xs text-[#e5e5e5] rounded-lg hover:border-[#c8c8d0] transition-colors"
+                      >추가</button>
+                    </div>
+                    {(orgConfig.customFolders || []).length > 0 && (
+                      <div className="flex flex-col gap-1 mt-2">
+                        {(orgConfig.customFolders || []).map((folder, i) => (
+                          <div key={i} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#141414] border border-[#2a2a2a]">
+                            <span className="flex-1 text-[11px] font-mono text-[#737373]">{folder}</span>
+                            <button
+                              onClick={() => setOrgConfigState(p => ({ ...p, customFolders: p.customFolders.filter((_, j) => j !== i) }))}
+                              className="text-[#404040] hover:text-red-400 transition-colors"
+                            >
+                              <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M2 4h12M5 4V2h6v2M6 7v5M10 7v5M3 4l1 10h8l1-10"/></svg>
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={async () => {
+                      setOrgSaving(true)
+                      try {
+                        await window.tidy?.org.setConfig(orgConfig)
+                        if (orgConfig.sharedVaultPath) await window.tidy?.org.initSharedVault(orgConfig.sharedVaultPath)
+                        showFeedback('success', '조직 설정이 저장됐습니다')
+                      } catch (e) { showFeedback('error', e.message) }
+                      finally { setOrgSaving(false) }
+                    }}
+                    disabled={orgSaving}
+                    className="w-full py-2 bg-[#1a1c28] border border-[#252840] text-[11px] text-[#818cf8] hover:bg-[#1e2035] hover:text-[#a5b4fc] rounded-lg transition-colors disabled:opacity-40"
+                  >
+                    {orgSaving ? '저장 중...' : '조직 설정 저장'}
+                  </button>
+                </div>
               </div>
-            </>
+            </div>
           )}
 
           {/* ── 채널 탭 ── */}
@@ -773,6 +890,133 @@ export default function Settings({ embedded = false }) {
                   </button>
                 </form>
               </div>
+
+              {/* ── 캘린더 ── */}
+              <div className="border border-[#2a2a2a] rounded-xl overflow-hidden">
+                <div className="flex items-center gap-2.5 px-4 py-3 bg-[#141414]">
+                  <span className="text-base">📅</span>
+                  <div>
+                    <p className="text-sm font-medium text-[#e5e5e5]">캘린더 자동 등록</p>
+                    <p className="text-xs text-[#404040]">미팅·약속·마감 감지 시 macOS 캘린더에 자동 추가</p>
+                  </div>
+                </div>
+                <form onSubmit={handleSaveCalendar} className="px-4 py-4 space-y-3">
+                  <div className="flex items-center justify-between gap-3 py-1">
+                    <span className="text-sm text-[#e5e5e5] flex-1 min-w-0">캘린더 자동 등록</span>
+                    <Toggle
+                      value={settings.calendarEnabled}
+                      onChange={() => setSettings((prev) => ({ ...prev, calendarEnabled: !prev.calendarEnabled }))}
+                    />
+                  </div>
+                  {settings.calendarEnabled && (
+                    <div>
+                      <input
+                        type="text"
+                        value={calendarName}
+                        onChange={(e) => setCalendarName(e.target.value)}
+                        placeholder={availableCalendars.length > 0 ? availableCalendars[0] : '홈'}
+                        className={inputCls}
+                      />
+                      {availableCalendars.length > 0 && (
+                        <p className="text-xs text-[#404040] mt-1">감지된 캘린더: {availableCalendars.join(', ')}</p>
+                      )}
+                    </div>
+                  )}
+                  <button type="submit" className={btnOutlineCls}>저장</button>
+                </form>
+              </div>
+
+              {/* ── Google Drive ── */}
+              <div className="border border-[#2a2a2a] rounded-xl overflow-hidden">
+                <div className="flex items-center gap-2.5 px-4 py-3 bg-[#141414]">
+                  <span className="text-base">△</span>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-[#e5e5e5]">Google Drive</p>
+                    <p className="text-xs text-[#404040]">Drive에 추가된 파일을 자동으로 분석해 인박스에 추가</p>
+                  </div>
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${
+                    gdriveConnected
+                      ? 'text-green-400 bg-green-900/20 border border-green-700/30'
+                      : 'text-[#737373] bg-[#1a1a1a] border border-[#2a2a2a]'
+                  }`}>
+                    {gdriveConnected ? '연결됨' : '미연결'}
+                  </span>
+                </div>
+                <div className="px-4 py-4 space-y-3">
+                  {gdriveConnected ? (
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-green-400">Google Drive에 연결됨</p>
+                      <button
+                        onClick={async () => {
+                          await window.tidy?.gdrive.disconnect()
+                          setGdriveConnected(false)
+                          showFeedback('success', 'Google Drive 연결이 해제되었습니다')
+                        }}
+                        className="text-xs text-red-400 hover:text-red-300 transition-colors"
+                      >연결 해제</button>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-xs text-[#404040]">
+                        <a
+                          href="#"
+                          onClick={(e) => { e.preventDefault(); window.open?.('https://console.cloud.google.com/apis/credentials', '_blank') }}
+                          className="text-[#c8c8d0] hover:underline"
+                        >Google Cloud Console</a>에서 OAuth 2.0 클라이언트 ID를 발급받으세요.
+                      </p>
+                      <div>
+                        <label className="block text-xs text-[#737373] mb-1.5">Client ID</label>
+                        <input
+                          type="text"
+                          value={gdriveClientId}
+                          onChange={(e) => setGdriveClientId(e.target.value)}
+                          placeholder="xxxx.apps.googleusercontent.com"
+                          className={inputCls}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-[#737373] mb-1.5">Client Secret</label>
+                        <input
+                          type="password"
+                          value={gdriveClientSecret}
+                          onChange={(e) => setGdriveClientSecret(e.target.value)}
+                          placeholder="GOCSPX-..."
+                          className={inputCls}
+                        />
+                      </div>
+                      <button
+                        disabled={!gdriveClientId.trim() || !gdriveClientSecret.trim() || gdriveConnecting}
+                        onClick={async () => {
+                          setGdriveConnecting(true)
+                          try {
+                            await window.tidy?.settings.save({
+                              gdriveClientId: gdriveClientId.trim(),
+                              gdriveClientSecret: gdriveClientSecret.trim(),
+                            })
+                            const res = await window.tidy?.gdrive.authStart()
+                            if (res?.success) {
+                              setGdriveConnected(true)
+                              showFeedback('success', 'Google Drive 연결 완료!')
+                            } else {
+                              showFeedback('error', res?.error || '연결 실패')
+                            }
+                          } catch (err) {
+                            showFeedback('error', err.message)
+                          } finally {
+                            setGdriveConnecting(false)
+                          }
+                        }}
+                        className="w-full py-2 bg-[#d4d4d8] hover:bg-[#b8b8c0] disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-medium rounded-lg transition-colors"
+                      >
+                        {gdriveConnecting ? '브라우저에서 인증 중...' : 'Google 계정으로 연결'}
+                      </button>
+                      <p className="text-xs text-[#333]">
+                        리디렉션 URI: <code className="text-[#555]">http://localhost:3141/oauth/callback</code>
+                      </p>
+                    </>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 
@@ -860,6 +1104,14 @@ export default function Settings({ embedded = false }) {
                     placeholder="/Users/me/Documents/MyVault"
                     className={`${inputCls} font-mono flex-1`}
                   />
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const folder = await window.tidy?.dialog.openFolder()
+                      if (folder) setVaultInput(folder)
+                    }}
+                    className="px-2.5 py-1.5 bg-[#1a1a1a] border border-[#2a2a2a] text-xs text-[#737373] rounded-lg hover:text-[#e5e5e5] hover:border-[#3a3a3a] transition-colors whitespace-nowrap"
+                  >찾기</button>
                   <button type="submit" disabled={!vaultInput.trim()} className="px-3 py-2 bg-[#141414] border border-[#2a2a2a] text-[#e5e5e5] text-sm rounded-lg hover:border-[#c8c8d0] hover:text-[#c8c8d0] disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap">
                     연결
                   </button>
@@ -898,110 +1150,52 @@ export default function Settings({ embedded = false }) {
                   + 폴더 추가
                 </button>
               </div>
+
+              {/* 파일 감시 폴더 */}
+              <div className="pt-4 border-t border-[#2a2a2a]">
+                <h2 className="text-sm font-semibold text-[#e5e5e5] mb-1">파일 감시 폴더</h2>
+                <p className="text-xs text-[#737373] mb-3">
+                  지정한 폴더에 파일을 넣으면 자동으로 분석해 인박스에 추가합니다.
+                </p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={watchFolderPath}
+                    onChange={(e) => setWatchFolderPath(e.target.value)}
+                    placeholder="예: /Users/me/Downloads/tidy-inbox"
+                    className="flex-1 bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-xs text-[#e5e5e5] placeholder-[#333] focus:outline-none focus:border-white/30"
+                  />
+                  <button
+                    onClick={async () => {
+                      const folder = await window.tidy?.dialog.openFolder()
+                      if (folder) setWatchFolderPath(folder)
+                    }}
+                    className="flex-shrink-0 px-3 py-2 bg-[#1e1e1e] border border-[#2a2a2a] rounded-lg text-xs text-[#9a9cb8] hover:text-[#d4d4d8] hover:border-[#3a3a3a] transition-colors"
+                  >
+                    찾기
+                  </button>
+                  <button
+                    onClick={async () => {
+                      const res = await window.tidy?.settings.save({ watchFolderPath: watchFolderPath.trim() })
+                      if (res?.success) showFeedback('success', watchFolderPath.trim() ? '감시 폴더가 설정되었습니다' : '감시 폴더가 해제되었습니다')
+                    }}
+                    className="flex-shrink-0 px-3 py-2 bg-[#d4d4d8] hover:bg-[#b8b8c0] text-white rounded-lg text-xs transition-colors"
+                  >
+                    저장
+                  </button>
+                </div>
+                {watchFolderPath && (
+                  <p className="text-xs text-[#404040] mt-1.5">감시 중: {watchFolderPath}</p>
+                )}
+              </div>
             </div>
           )}
 
           {/* ── 알림 탭 ── */}
           {tab === 'notifications' && (
             <div className="space-y-6">
-              {/* 테마 */}
-              <div>
-                <h2 className="text-sm font-semibold text-[#e5e5e5] mb-1">화면 테마</h2>
-                <p className="text-xs text-[#737373] mb-3">앱의 색상 테마를 선택합니다</p>
-                <div className="flex gap-2">
-                  {[
-                    { value: 'auto', label: '시스템', icon: '◐' },
-                    { value: 'dark', label: '다크',   icon: '●' },
-                    { value: 'light', label: '라이트', icon: '○' },
-                  ].map(({ value, label, icon }) => (
-                    <button
-                      key={value}
-                      onClick={() => setTheme(value)}
-                      className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-[13px] transition-colors ${
-                        currentTheme === value
-                          ? 'border-[#d4d4d8]/40 bg-[#d4d4d8]/10 text-[#d4d4d8]'
-                          : 'border-[#2a2a2a] text-[#737373] hover:text-[#9a9cb8] hover:border-[#3a3a3a]'
-                      }`}
-                    >
-                      <span className="text-[11px]">{icon}</span>
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* 글씨 크기 */}
-              <div>
-                <h2 className="text-sm font-semibold text-[#e5e5e5] mb-1">글씨 크기</h2>
-                <p className="text-xs text-[#737373] mb-3">앱 전체 텍스트 크기를 조절합니다</p>
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => setFontSize(fontSize - 0.1)}
-                    disabled={fontSize <= 0.8}
-                    className="w-7 h-7 rounded-lg border border-[#2a2a2a] text-[#9a9cb8] hover:border-[#3a3a3a] hover:text-white disabled:opacity-30 flex items-center justify-center text-base transition-colors"
-                  >−</button>
-                  <div className="flex-1 relative h-1.5 bg-[#2a2a2a] rounded-full">
-                    <div
-                      className="absolute left-0 top-0 h-full rounded-full bg-[#d4d4d8] transition-all"
-                      style={{ width: `${((fontSize - 0.8) / 0.6) * 100}%` }}
-                    />
-                    <input
-                      type="range"
-                      min={0.8} max={1.4} step={0.05}
-                      value={fontSize}
-                      onChange={e => setFontSize(parseFloat(e.target.value))}
-                      className="absolute inset-0 w-full opacity-0 cursor-pointer h-full"
-                    />
-                  </div>
-                  <button
-                    onClick={() => setFontSize(fontSize + 0.1)}
-                    disabled={fontSize >= 1.4}
-                    className="w-7 h-7 rounded-lg border border-[#2a2a2a] text-[#9a9cb8] hover:border-[#3a3a3a] hover:text-white disabled:opacity-30 flex items-center justify-center text-base transition-colors"
-                  >+</button>
-                  <span className="text-[12px] text-[#737373] w-10 text-right">{Math.round(fontSize * 100)}%</span>
-                  <button
-                    onClick={() => setFontSize(1)}
-                    className="text-[11px] text-[#505272] hover:text-[#9a9cb8] transition-colors"
-                  >초기화</button>
-                </div>
-                <div className="mt-3 px-3 py-2 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a]">
-                  <p className="text-[#9a9cb8]" style={{ fontSize: `${fontSize * 13}px` }}>미리보기 — 안녕하세요, Tidy입니다.</p>
-                </div>
-              </div>
-
-              {/* 캘린더 */}
-              <div>
-                <h2 className="text-sm font-semibold text-[#e5e5e5] mb-1">캘린더 자동 등록</h2>
-                <p className="text-xs text-[#737373] mb-3">미팅·약속·마감이 감지되면 macOS 캘린더에 자동으로 추가합니다</p>
-
-                <form onSubmit={handleSaveCalendar} className="space-y-3">
-                  <div className="flex items-center justify-between gap-3 py-1">
-                    <span className="text-sm text-[#e5e5e5] flex-1 min-w-0">캘린더 자동 등록</span>
-                    <Toggle
-                      value={settings.calendarEnabled}
-                      onChange={() => setSettings((prev) => ({ ...prev, calendarEnabled: !prev.calendarEnabled }))}
-                    />
-                  </div>
-                  {settings.calendarEnabled && (
-                    <div>
-                      <input
-                        type="text"
-                        value={calendarName}
-                        onChange={(e) => setCalendarName(e.target.value)}
-                        placeholder={availableCalendars.length > 0 ? availableCalendars[0] : '홈'}
-                        className={inputCls}
-                      />
-                      {availableCalendars.length > 0 && (
-                        <p className="text-xs text-[#404040] mt-1">감지된 캘린더: {availableCalendars.join(', ')}</p>
-                      )}
-                    </div>
-                  )}
-                  <button type="submit" className={btnOutlineCls}>저장</button>
-                </form>
-              </div>
-
               {/* 앱 알림 감지 */}
-              <div className="pt-4 border-t border-[#2a2a2a]">
+              <div>
                 <h2 className="text-sm font-semibold text-[#e5e5e5] mb-1">앱 알림 감지</h2>
                 <p className="text-xs text-[#737373] mb-3">
                   맥에 설치된 모든 앱의 알림을 자동으로 수집합니다.
@@ -1055,44 +1249,6 @@ export default function Settings({ embedded = false }) {
                 </div>
               </div>
 
-              {/* 파일 감시 폴더 */}
-              <div className="pt-4 border-t border-[#2a2a2a]">
-                <h2 className="text-sm font-semibold text-[#e5e5e5] mb-1">파일 감시 폴더</h2>
-                <p className="text-xs text-[#737373] mb-3">
-                  지정한 폴더에 파일을 넣으면 자동으로 분석해 인박스에 추가합니다.
-                </p>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={watchFolderPath}
-                    onChange={(e) => setWatchFolderPath(e.target.value)}
-                    placeholder="예: /Users/me/Downloads/tidy-inbox"
-                    className="flex-1 bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-xs text-[#e5e5e5] placeholder-[#333] focus:outline-none focus:border-white/30"
-                  />
-                  <button
-                    onClick={async () => {
-                      const folder = await window.tidy?.dialog.openFolder()
-                      if (folder) setWatchFolderPath(folder)
-                    }}
-                    className="flex-shrink-0 px-3 py-2 bg-[#1e1e1e] border border-[#2a2a2a] rounded-lg text-xs text-[#9a9cb8] hover:text-[#d4d4d8] hover:border-[#3a3a3a] transition-colors"
-                  >
-                    찾기
-                  </button>
-                  <button
-                    onClick={async () => {
-                      const res = await window.tidy?.settings.save({ watchFolderPath: watchFolderPath.trim() })
-                      if (res?.success) showFeedback('success', watchFolderPath.trim() ? '감시 폴더가 설정되었습니다' : '감시 폴더가 해제되었습니다')
-                    }}
-                    className="flex-shrink-0 px-3 py-2 bg-[#d4d4d8] hover:bg-[#b8b8c0] text-white rounded-lg text-xs transition-colors"
-                  >
-                    저장
-                  </button>
-                </div>
-                {watchFolderPath && (
-                  <p className="text-xs text-[#404040] mt-1.5">감시 중: {watchFolderPath}</p>
-                )}
-              </div>
-
               {/* 앱별 알림 필터 */}
               <div className="pt-4 border-t border-[#2a2a2a]">
                 <div className="flex items-center justify-between mb-1">
@@ -1142,101 +1298,6 @@ export default function Settings({ embedded = false }) {
                       })}
                   </div>
                 )}
-              </div>
-            </div>
-          )}
-
-          {/* ── Google Drive 탭 ──────────────────────────── */}
-          {tab === 'gdrive' && (
-            <div className="space-y-6">
-              <div>
-                <h2 className="text-sm font-semibold text-[#e5e5e5] mb-1">Google Drive 연동</h2>
-                <p className="text-xs text-[#404040] mb-4">
-                  Drive에 새로 추가된 파일을 자동으로 분석해 인박스에 추가합니다.
-                  <br />
-                  <a
-                    href="#"
-                    onClick={(e) => { e.preventDefault(); window.open?.('https://console.cloud.google.com/apis/credentials', '_blank') }}
-                    className="text-[#c8c8d0] hover:underline"
-                  >Google Cloud Console</a>에서 OAuth 2.0 클라이언트 ID를 발급받으세요.
-                </p>
-
-                {/* 연결 상태 */}
-                <div className={`flex items-center gap-2 px-3 py-2 rounded-lg mb-4 ${gdriveConnected ? 'bg-green-900/20 border border-green-700/30' : 'bg-[#1a1a1a] border border-[#2a2a2a]'}`}>
-                  <span className="text-base">{gdriveConnected ? '🟢' : '⚪'}</span>
-                  <span className="text-xs text-[#a0a0a0]">{gdriveConnected ? 'Google Drive에 연결됨' : '연결되지 않음'}</span>
-                  {gdriveConnected && (
-                    <button
-                      onClick={async () => {
-                        await window.tidy?.gdrive.disconnect()
-                        setGdriveConnected(false)
-                        showFeedback('ok', 'Google Drive 연결이 해제되었습니다')
-                      }}
-                      className="ml-auto text-xs text-red-400 hover:text-red-300 transition-colors"
-                    >연결 해제</button>
-                  )}
-                </div>
-
-                {/* Client ID / Secret 입력 */}
-                {!gdriveConnected && (
-                  <div className="space-y-3">
-                    <div>
-                      <label className="block text-xs text-[#737373] mb-1.5">Client ID</label>
-                      <input
-                        type="text"
-                        value={gdriveClientId}
-                        onChange={(e) => setGdriveClientId(e.target.value)}
-                        placeholder="xxxx.apps.googleusercontent.com"
-                        className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-xs text-[#e5e5e5] placeholder-[#333] focus:outline-none focus:border-white/40"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-[#737373] mb-1.5">Client Secret</label>
-                      <input
-                        type="password"
-                        value={gdriveClientSecret}
-                        onChange={(e) => setGdriveClientSecret(e.target.value)}
-                        placeholder="GOCSPX-..."
-                        className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-xs text-[#e5e5e5] placeholder-[#333] focus:outline-none focus:border-white/40"
-                      />
-                    </div>
-
-                    <button
-                      disabled={!gdriveClientId.trim() || !gdriveClientSecret.trim() || gdriveConnecting}
-                      onClick={async () => {
-                        setGdriveConnecting(true)
-                        try {
-                          // 먼저 credentials 저장
-                          await window.tidy?.settings.save({
-                            gdriveClientId: gdriveClientId.trim(),
-                            gdriveClientSecret: gdriveClientSecret.trim(),
-                          })
-                          // OAuth 흐름 시작 (브라우저 열기)
-                          const res = await window.tidy?.gdrive.authStart()
-                          if (res?.success) {
-                            setGdriveConnected(true)
-                            showFeedback('ok', 'Google Drive 연결 완료!')
-                          } else {
-                            showFeedback('error', res?.error || '연결 실패')
-                          }
-                        } catch (err) {
-                          showFeedback('error', err.message)
-                        } finally {
-                          setGdriveConnecting(false)
-                        }
-                      }}
-                      className="w-full py-2 bg-[#d4d4d8] hover:bg-[#b8b8c0] disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-medium rounded-lg transition-colors"
-                    >
-                      {gdriveConnecting ? '브라우저에서 인증 중...' : 'Google 계정으로 연결'}
-                    </button>
-                  </div>
-                )}
-
-                <p className="text-xs text-[#333] mt-4">
-                  리디렉션 URI: <code className="text-[#555]">http://localhost:3141/oauth/callback</code>
-                  <br />
-                  Google Cloud Console의 승인된 리디렉션 URI에 위 주소를 추가하세요.
-                </p>
               </div>
             </div>
           )}
@@ -1562,7 +1623,7 @@ npm start`}</pre>
                         a.download = `tidy-settings-${new Date().toISOString().slice(0, 10)}.json`
                         a.click()
                         URL.revokeObjectURL(url)
-                        showFeedback('ok', '설정을 내보냈습니다')
+                        showFeedback('success', '설정을 내보냈습니다')
                       } catch (e) { showFeedback('error', e.message) }
                     }}
                     className="px-4 py-2 bg-[#1e1e1e] hover:bg-[#2a2a2a] text-xs text-[#c8c8d0] rounded-lg transition-colors border border-[#2a2a2a]"
@@ -1590,7 +1651,7 @@ npm start`}</pre>
                             const data = JSON.parse(ev.target.result)
                             const res  = await window.tidy?.settings.import(data)
                             if (res?.success) {
-                              showFeedback('ok', '설정을 가져왔습니다. 앱을 재시작해 주세요.')
+                              showFeedback('success', '설정을 가져왔습니다. 앱을 재시작해 주세요.')
                             } else {
                               showFeedback('error', res?.error || '가져오기 실패')
                             }
@@ -1603,11 +1664,48 @@ npm start`}</pre>
                   </label>
                 </div>
               </div>
+
+              {/* 개발용 테스트 */}
+              <div className="pt-4 border-t border-[#2a2a2a] space-y-3">
+                <p className="text-xs text-[#404040]">개발용 테스트</p>
+                <textarea
+                  value={testText}
+                  onChange={(e) => setTestText(e.target.value)}
+                  rows={3}
+                  className="w-full bg-[#141414] border border-[#2a2a2a] rounded-lg px-3 py-2 text-xs text-[#e5e5e5] placeholder-[#404040] focus:outline-none focus:border-white/30 resize-none"
+                  placeholder="테스트할 메시지를 입력하세요..."
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={async () => {
+                      const res = await window.tidy?.dev.injectTest({ text: testText || undefined, source: testSource })
+                      if (res?.success) showFeedback('success', '테스트 메시지 주입 완료 — 인박스 확인')
+                      else showFeedback('error', res?.error || '실패')
+                    }}
+                    className="px-3 py-1.5 bg-[#1a1a2e] border border-[#3a3a5a] text-[#8a8cb8] text-xs rounded-lg hover:border-[#6a6c98] hover:text-[#c8c8d0] transition-colors"
+                  >
+                    주입
+                  </button>
+                  <select
+                    value={testSource}
+                    onChange={(e) => setTestSource(e.target.value)}
+                    className="bg-[#141414] border border-[#2a2a2a] rounded-lg px-2 py-1.5 text-xs text-[#737373] focus:outline-none"
+                  >
+                    <option value="test">test</option>
+                    <option value="kakao">kakao</option>
+                    <option value="imessage">imessage</option>
+                    <option value="gmail">gmail</option>
+                    <option value="slack">slack</option>
+                  </select>
+                </div>
+                <p className="text-xs text-[#404040]">Tidy v0.1.0 · MVP</p>
+              </div>
             </div>
           )}
 
         </div>
       </div>
+      )}
     </div>
   )
 }

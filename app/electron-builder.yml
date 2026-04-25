@@ -10,6 +10,10 @@ files:
   - package.json
   - node_modules/**/*
 
+extraResources:
+  - from: resources/hwpx
+    to: hwpx
+
 asarUnpack:
   - node_modules/better-sqlite3/**/*
   - node_modules/bplist-parser/**/*
@@ -22,8 +26,8 @@ mac:
   target:
     - dmg
   icon: build/icon.icns
-  hardenedRuntime: false
-  gatekeeperAssess: false
+  hardenedRuntime: true
+  gatekeeperAssess: true
   extendInfo:
     NSMicrophoneUsageDescription: "음성 입력을 위해 마이크에 접근합니다."
     NSSpeechRecognitionUsageDescription: "음성을 텍스트로 변환하기 위해 음성 인식을 사용합니다."

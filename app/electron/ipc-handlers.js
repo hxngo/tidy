@@ -358,6 +358,11 @@ async function processIncomingMessage(rawText, source, win, opts = {}) {
     return null
   }
 
+  // 요약이 비어 있으면 원본 텍스트로 대체 (요약없음 방지)
+  if (!analysis.summary) {
+    analysis.summary = rawText.slice(0, 120)
+  }
+
   // 3. 프로젝트 노드 처리 — 기존 매칭 또는 신규 생성
   let projectName = null
   if (analysis.project_hint) {
@@ -853,7 +858,11 @@ function setupIpcHandlers(ipcMain, getWindow) {
   // ─── Org Config (회사/부서/공유 볼트) ────────────────────────────
   ipcMain.handle('org:get-config', () => vault.getOrgConfig())
 
-  ipcMain.handle('org:set-config', (_event, config) => vault.setOrgConfig(config))
+  ipcMain.handle('org:set-config', (_event, config) => {
+    const updated = vault.setOrgConfig(config)
+    require('./core/mcp-client').reconnect()
+    return updated
+  })
 
   ipcMain.handle('org:init-shared-vault', (_event, vaultPath) => {
     const ok = vault.initSharedVault(vaultPath)
@@ -990,6 +999,136 @@ function setupIpcHandlers(ipcMain, getWindow) {
     }
   })
 
+  // 파일/폴더 분석 → 프로필 초안 생성 (Cold Start)
+  ipcMain.handle('profile:scan-files', async (_event, { filePaths = [] }) => {
+    try {
+      const Anthropic = require('@anthropic-ai/sdk')
+      const apiKey = store.get('anthropicKey')
+      if (!apiKey) return { error: 'API 키 없음' }
+
+      const fileContents = []
+      for (const fp of filePaths.slice(0, 10)) {
+        try {
+          const stat = fs.statSync(fp)
+          if (stat.isDirectory()) {
+            const entries = fs.readdirSync(fp, { withFileTypes: true })
+            const list = entries.slice(0, 300).map(e =>
+              e.isDirectory() ? `📁 ${e.name}/` : `📄 ${e.name}`
+            )
+            fileContents.push(`[폴더: ${path.basename(fp)}]\n${list.join('\n')}`)
+          } else {
+            const buf = fs.readFileSync(fp)
+            const text = buf.toString('utf-8').slice(0, 40000)
+            fileContents.push(`[파일: ${path.basename(fp)}]\n${text}`)
+          }
+        } catch (e) {
+          fileContents.push(`[읽기 실패: ${path.basename(fp)}]`)
+        }
+      }
+
+      if (fileContents.length === 0) return { error: '읽을 수 있는 파일이 없습니다' }
+
+      const combined = fileContents.join('\n\n---\n\n').slice(0, 200000)
+      const client = new Anthropic({ apiKey })
+
+      const response = await client.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 2000,
+        system: `사용자가 제공한 파일/폴더를 분석하여 업무 프로필을 추출합니다.
+파일 목록·이메일·연락처·채팅 등에서 이름, 직책, 회사, 팀원, 프로젝트, 업무 유형 등을 찾아냅니다.
+확실한 정보만 포함하고, 불확실한 것은 null로 표시하세요.
+반드시 JSON만 반환하세요.`,
+        messages: [{
+          role: 'user',
+          content: `다음 파일들을 분석하여 사용자 업무 프로필을 추출하세요:\n\n${combined}\n\n반환 형식:\n{\n  "name": "이름 또는 null",\n  "title": "직책 또는 null",\n  "department": "부서 또는 null",\n  "company": "회사 또는 null",\n  "industry": "업계 또는 null",\n  "projects": ["현재 프로젝트명"],\n  "workTypes": ["주요 업무 유형 (예: 개발, 기획, 보고서 작성)"],\n  "teammates": ["동료/팀원 이름"],\n  "clients": ["거래처/클라이언트명"],\n  "communication": "주요 소통 방식 또는 null",\n  "domain_keywords": ["업무 전문 용어"],\n  "summary": "한 줄 요약",\n  "found_sources": ["파일명: 찾은 정보 요약"]\n}`,
+        }],
+      })
+
+      const raw = response.content[0]?.text?.trim() || '{}'
+      const jsonMatch = raw.match(/\{[\s\S]*\}/)
+      const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {}
+      const { found_sources, ...profileData } = parsed
+      return { success: true, profile: profileData, found: found_sources || [] }
+    } catch (e) {
+      console.error('[Profile] scan-files 오류:', e.message)
+      return { error: e.message }
+    }
+  })
+
+  // 검증된 프로필로 지식 베이스 재합성 (원본 대화 폐기 후 호출)
+  ipcMain.handle('profile:synthesize', async (_event, profile) => {
+    try {
+      const Anthropic = require('@anthropic-ai/sdk')
+      const apiKey = store.get('anthropicKey')
+      if (!apiKey) return { error: 'API 키 없음' }
+
+      const client = new Anthropic({ apiKey })
+      const profileText = JSON.stringify(profile, null, 2)
+
+      const response = await client.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1000,
+        system: '검증된 사용자 프로필을 바탕으로 AI 에이전트가 참조할 업무 맥락 문서를 마크다운으로 작성합니다.',
+        messages: [{
+          role: 'user',
+          content: `다음 프로필을 바탕으로 AI 에이전트용 업무 맥락 문서를 작성하세요:\n\n${profileText}\n\n형식: 마크다운, 500자 이내, # 업무 맥락 으로 시작`,
+        }],
+      })
+
+      const markdown = response.content[0]?.text?.trim() || `# 업무 맥락\n\n${profile.summary || ''}`
+      vault.saveProfileContext(markdown)
+      return { success: true }
+    } catch (e) {
+      console.error('[Profile] synthesize 오류:', e.message)
+      return { error: e.message }
+    }
+  })
+
+  // ─── AI 자연어 명령 라우팅 ────────────────────────────────────
+
+  ipcMain.handle('skill:command', async (_event, { query }) => {
+    try {
+      const mcpClient = require('./core/mcp-client')
+      const cfg = getMcpClientConfig()
+
+      // 쿼리에서 로컬 파일 경로 감지 → 내용 자동 삽입
+      // 파일 경로 감지 → 내용 추출 (라우팅은 원본 짧은 쿼리로, 실행은 파일 내용 포함)
+      const filePathRe = /(?:^|\s)((?:\/|~\/)[^\s'"]+\.[a-zA-Z0-9]+)/g
+      let match
+      const fileParts = []
+      const fileErrors = []
+      while ((match = filePathRe.exec(query)) !== null) {
+        const rawPath = match[1].replace(/^~/, require('os').homedir())
+        try {
+          const text = await extractText(rawPath)
+          fileParts.push(`[파일: ${path.basename(rawPath)}]\n${text}`)
+        } catch (e) {
+          fileErrors.push(`${path.basename(rawPath)}: ${e.message}`)
+        }
+      }
+      if (fileErrors.length > 0 && fileParts.length === 0) {
+        return { success: false, error: `파일을 읽을 수 없습니다 — ${fileErrors.join(', ')}` }
+      }
+
+      // 파일 경로 제거한 순수 명령어 (라우팅용)
+      const cleanQuery = query.replace(filePathRe, '').trim() || query.trim()
+      // 스킬 실행용 입력 (파일 내용 + 명령어)
+      const fullInput = fileParts.length > 0
+        ? `${fileParts.join('\n\n')}\n\n지시: ${cleanQuery}`
+        : query
+
+      const customSkillsJson = JSON.stringify(vault.getCustomSkills())
+      const { output, meta } = await mcpClient.callTool(
+        'smart_command',
+        { query: cleanQuery, file_input: fullInput, custom_skills: customSkillsJson },
+        cfg,
+      )
+      return { success: true, output, usedSkill: meta?.usedSkill || null }
+    } catch (e) {
+      return { success: false, error: e.message }
+    }
+  })
+
   // ─── Custom Skills ─────────────────────────────────────────────
 
   ipcMain.handle('skill:list-custom', () => {
@@ -999,6 +1138,7 @@ function setupIpcHandlers(ipcMain, getWindow) {
   ipcMain.handle('skill:save-custom', (_event, skill) => {
     try {
       const saved = vault.saveCustomSkill(skill)
+      require('./core/mcp-client').reconnect()   // 커스텀 스킬 변경 → MCP 재연결
       return { success: true, skill: saved }
     } catch (e) {
       return { error: e.message }
@@ -1007,6 +1147,7 @@ function setupIpcHandlers(ipcMain, getWindow) {
 
   ipcMain.handle('skill:delete-custom', (_event, { id }) => {
     const ok = vault.deleteCustomSkill(id)
+    require('./core/mcp-client').reconnect()     // 커스텀 스킬 변경 → MCP 재연결
     return { success: ok }
   })
 
@@ -1630,30 +1771,52 @@ function setupIpcHandlers(ipcMain, getWindow) {
   })
 
   // ─── 스킬 실행 & 출력물 관리 ────────────────────────────────
+  // ─── MCP 클라이언트 설정 헬퍼 ────────────────────────────────
+
+  function getMcpClientConfig() {
+    const orgConfig = vault.getOrgConfig()
+    return {
+      apiKey:         store.get('anthropicKey'),
+      customSkills:   vault.getCustomSkills(),
+      orgName:        orgConfig.company        || '',
+      customGlossary: orgConfig.customGlossary || '',
+      customFolders:  orgConfig.customFolders  || [],
+    }
+  }
+
+  const SKILL_LABELS = {
+    summary: '요약', translate: '번역', minutes: '회의록', report: '보고서',
+    kpi: 'KPI 현황', slides: '슬라이드', budget: '예산표', notebook: '노트',
+    onboarding: '온보딩', hwp: '공문서(HWP)', filing: '파일 분류', agent: '행정 에이전트',
+  }
+
   ipcMain.handle('skill:run', async (_event, { skillId, input, sourceItemId, messages, customPrompt }) => {
     try {
-      const { runSkill } = require('./core/ai')
-      const SKILL_LABELS = {
-        summary: '요약', translate: '번역', minutes: '회의록', report: '보고서',
-        kpi: 'KPI 현황', slides: '슬라이드', budget: '예산표', notebook: '노트', onboarding: '온보딩', hwp: '공문서(HWP)',
+      const mcpClient = require('./core/mcp-client')
+      const cfg = getMcpClientConfig()
+
+      let toolName, toolArgs
+
+      if (skillId?.startsWith('custom-')) {
+        toolName = 'run_custom'
+        toolArgs = {
+          skill_id:      skillId,
+          input,
+          system_prompt: customPrompt || undefined,
+          messages:      messages || [],
+        }
+      } else {
+        toolName = skillId
+        toolArgs = { input, messages: messages || [] }
       }
-      // 커스텀 스킬이면 vault에서 systemPrompt 조회 (또는 직접 전달된 customPrompt 사용)
-      let resolvedPrompt = customPrompt || null
-      if (!resolvedPrompt && skillId?.startsWith('custom-')) {
-        const customSkills = vault.getCustomSkills()
-        const found = customSkills.find(s => s.id === skillId)
-        if (found?.systemPrompt) resolvedPrompt = found.systemPrompt
-      }
-      const result = await runSkill(skillId, input, { messages: messages || [], customPrompt: resolvedPrompt })
-      const { output, messages: nextMessages } = result
+
+      const { output, messages: nextMessages } = await mcpClient.callTool(toolName, toolArgs, cfg)
 
       // 첫 번째 호출(messages 없음)에만 vault에 저장
       let savedId = null
       if (!messages || messages.length === 0) {
-        // 커스텀 스킬 레이블 조회
         if (skillId?.startsWith('custom-')) {
-          const customSkills = vault.getCustomSkills()
-          const found = customSkills.find(s => s.id === skillId)
+          const found = cfg.customSkills.find(s => s.id === skillId)
           if (found) SKILL_LABELS[skillId] = found.label
         }
         const skillLabel = SKILL_LABELS[skillId] || skillId
@@ -1661,11 +1824,58 @@ function setupIpcHandlers(ipcMain, getWindow) {
         savedId = saved.id
       }
 
-      return { success: true, output, messages: nextMessages, id: savedId }
+      // nextMessages: MCP _meta에서 반환된 대화 히스토리, 없으면 직접 구성
+      const retMessages = nextMessages || [
+        ...(messages || []),
+        { role: 'user', content: input },
+        { role: 'assistant', content: output },
+      ]
+
+      return { success: true, output, messages: retMessages, id: savedId }
     } catch (error) {
       return { success: false, error: error.message }
     }
   })
+
+  // ─── 파일 분류 스킬 (MCP) ────────────────────────────────────
+  ipcMain.handle('skill:run-filing', async (_event, fileInfo) => {
+    try {
+      const mcpClient = require('./core/mcp-client')
+      const cfg = getMcpClientConfig()
+      const { output } = await mcpClient.callTool('filing', fileInfo, cfg)
+      const result = JSON.parse(output)
+      return { success: true, ...result }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // ─── 슬라이드 HTML 생성 (MCP) ────────────────────────────────
+  ipcMain.handle('skill:run-slides-html', async (_event, { input, sourceItemId }) => {
+    try {
+      const mcpClient = require('./core/mcp-client')
+      const os = require('os')
+      const cfg = getMcpClientConfig()
+
+      const { output: html } = await mcpClient.callTool('slides_html', { input }, cfg)
+
+      const ts = Date.now()
+      const tmpPath = path.join(os.tmpdir(), `tidy-slides-${ts}.html`)
+      fs.writeFileSync(tmpPath, html, 'utf-8')
+
+      const saved = vault.saveSkillOutput({ skillId: 'slides-html', skillLabel: '슬라이드 HTML', input, output: html, sourceItemId })
+
+      // macOS: open, Windows: start
+      const { exec } = require('child_process')
+      const openCmd = process.platform === 'win32' ? `start "" "${tmpPath}"` : `open "${tmpPath}"`
+      exec(openCmd)
+
+      return { success: true, filePath: tmpPath, id: saved.id }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
 
   ipcMain.handle('skill:outputs:get', async () => {
     try {
@@ -1711,6 +1921,8 @@ function setupIpcHandlers(ipcMain, getWindow) {
         notebook:   { app: 'Obsidian',          ext: 'md'  },
         summary:    { app: 'TextEdit',          ext: 'txt' },
         translate:  { app: 'TextEdit',          ext: 'txt' },
+        agent:      { app: 'Pages',             ext: 'txt' },
+        filing:     { app: 'TextEdit',          ext: 'txt' },
       }
 
       const cfg = SKILL_APP_MAP[skillId] || { app: 'TextEdit', ext: 'txt' }
@@ -1978,6 +2190,1651 @@ function setupIpcHandlers(ipcMain, getWindow) {
     authorId:   store.get('marketAuthorId'),
     authorName: store.get('marketAuthorName') || '',
   }))
+
+  // ─── 문서 편집기 ───────────────────────────────────────────────────────────
+  ipcMain.handle('document:open-file', async (_event) => {
+    const win = getWindow() || null
+    const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+      title: '문서 열기',
+      filters: [
+        { name: '지원 문서', extensions: ['hwp', 'docx', 'txt', 'md', 'html', 'htm'] },
+        { name: 'HWP 문서',  extensions: ['hwp'] },
+        { name: 'Word 문서', extensions: ['docx'] },
+        { name: '텍스트',    extensions: ['txt', 'md'] },
+        { name: 'HTML',     extensions: ['html', 'htm'] },
+      ],
+      properties: ['openFile'],
+    })
+    if (canceled || !filePaths.length) return null
+    return { filePath: filePaths[0] }
+  })
+
+  // 일반 파일 읽기 (텍스트/HTML/MD 용)
+  ipcMain.handle('document:read-text', async (_event, filePath) => {
+    try {
+      return fs.readFileSync(filePath, 'utf-8')
+    } catch (e) {
+      throw new Error('파일 읽기 실패: ' + e.message)
+    }
+  })
+
+  ipcMain.handle('document:read-file', async (_event, filePath) => {
+    try {
+      const buf = fs.readFileSync(filePath)
+      const arr = new Uint8Array(buf.byteLength)
+      arr.set(buf)
+      return arr
+    } catch (e) {
+      console.error('[Document] 파일 읽기 오류:', e.message)
+      return null
+    }
+  })
+
+  // DOCX → HTML (mammoth) — filePath(string) 또는 bytes(Uint8Array) 모두 지원
+  ipcMain.handle('document:import-docx', async (_event, filePathOrBytes) => {
+    try {
+      const mammoth = require('mammoth')
+      let result
+      if (typeof filePathOrBytes === 'string') {
+        result = await mammoth.convertToHtml({ path: filePathOrBytes })
+      } else {
+        // Renderer에서 Uint8Array로 전달된 경우 (드래그앤드롭)
+        result = await mammoth.convertToHtml({ buffer: Buffer.from(filePathOrBytes) })
+      }
+      const html = result.value || ''
+      const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+      return { html, text }
+    } catch (e) {
+      console.error('[Document] DOCX 변환 오류:', e.message)
+      throw new Error('DOCX 변환 실패: ' + e.message)
+    }
+  })
+
+  // AI 재편집 — Claude가 템플릿에 맞게 HTML 재구성
+  ipcMain.handle('document:reorganize', async (_event, {
+    text, sourceHtml, templateId, instruction,
+    templateStructure, templateCss, templateName,
+  }) => {
+    const TEMPLATES_MAP = {
+      report:   { name: '보고서',   prompt: '보고서 형식. 숫자는 표로, 현황·성과 비교는 가로 막대 차트로, 시계열 데이터는 세로 막대 차트로. 핵심은 글머리기호.' },
+      gongmun:  { name: '공문',     prompt: '공문 형식. 격식체 사용. 수신·참조·제목·본문·붙임 구조. 통계 자료는 표와 차트 동시 활용.' },
+      minutes:  { name: '회의록',   prompt: '회의록 형식. 결정사항은 담당자·기한 표로. 안건별 투표·찬반 비율은 가로 막대 차트.' },
+      proposal: { name: '제안서',   prompt: '제안서 형식. 배경→목표→방법→효과→예산. 예산·비용은 표+가로 막대 차트, 추진 일정은 절차도(flow).' },
+      notice:   { name: '안내문',   prompt: '안내문 형식. 대상·일시·장소 표로. 프로그램 순서나 일정은 절차도(flow)로 시각화.' },
+    }
+    const tpl = TEMPLATES_MAP[templateId] || TEMPLATES_MAP.report
+    if (templateName) tpl.name = templateName
+
+    const BASE_CSS = `* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: '맑은 고딕', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; font-size: 10pt; line-height: 1.9; color: #111; background: #fff; padding: 50px 70px; max-width: 820px; margin: 0 auto; }
+h1 { font-size: 15pt; font-weight: 700; text-align: center; margin: 12px 0 18px; }
+h2 { font-size: 12pt; font-weight: 700; margin: 20px 0 8px; padding-bottom: 3px; border-bottom: 1.5px solid #333; }
+h3 { font-size: 11pt; font-weight: 600; margin: 14px 0 6px; }
+p { margin: 5px 0; }
+table { border-collapse: collapse; width: 100%; margin: 10px 0; }
+th, td { border: 1px solid #555; padding: 5px 9px; font-size: 9.5pt; }
+th { background: #e6e6e6; font-weight: 600; text-align: center; }
+ul, ol { margin: 6px 0 6px 22px; }
+li { margin: 3px 0; }
+.center { text-align: center; } .right { text-align: right; } .bold { font-weight: 700; }
+.meta { font-size: 9pt; color: #555; }
+hr { border: none; border-top: 1px solid #ccc; margin: 18px 0; }
+
+/* ── 도표: CSS 바 차트 ─────────────────── */
+.chart { margin: 14px 0; padding: 14px 16px; border: 1px solid #ccc; background: #fafafa; page-break-inside: avoid; }
+.chart-title { font-size: 10.5pt; font-weight: 700; margin-bottom: 10px; text-align: center; }
+.chart-caption { font-size: 9pt; color: #666; margin-top: 8px; text-align: center; }
+.bar-row { display: flex; align-items: center; margin: 5px 0; gap: 8px; }
+.bar-label { width: 110px; font-size: 9.5pt; text-align: right; flex-shrink: 0; }
+.bar-track { flex: 1; height: 20px; background: #e5e5e5; border: 1px solid #bbb; position: relative; }
+.bar-fill  { height: 100%; background: #4a5cdb; display: flex; align-items: center; padding: 0 8px; color: #fff; font-size: 8.5pt; font-weight: 600; }
+.bar-fill.c2 { background: #10a765; } .bar-fill.c3 { background: #d97706; }
+.bar-fill.c4 { background: #be185d; } .bar-fill.c5 { background: #0891b2; }
+.bar-value { width: 70px; font-size: 9.5pt; text-align: left; flex-shrink: 0; }
+
+/* ── 도표: 세로 막대 차트 (간단) ─────────── */
+.vbar-chart { display: flex; align-items: flex-end; gap: 12px; height: 180px; padding: 10px; border-bottom: 2px solid #333; }
+.vbar-col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; }
+.vbar-bar { width: 100%; background: #4a5cdb; display: flex; align-items: flex-start; justify-content: center; padding-top: 4px; color: #fff; font-size: 8.5pt; font-weight: 600; }
+.vbar-col:nth-child(2n) .vbar-bar { background: #10a765; }
+.vbar-col:nth-child(3n) .vbar-bar { background: #d97706; }
+.vbar-label { font-size: 9pt; margin-top: 5px; text-align: center; }
+
+/* ── 도표: 플로우 박스 (절차도) ─────────── */
+.flow { display: flex; gap: 0; flex-wrap: wrap; align-items: stretch; margin: 12px 0; }
+.flow-box { flex: 1; min-width: 120px; border: 1.5px solid #333; padding: 10px 8px; background: #fff; text-align: center; font-size: 9.5pt; position: relative; }
+.flow-box + .flow-box::before { content: "▶"; position: absolute; left: -10px; top: 50%; transform: translateY(-50%); font-size: 11pt; color: #555; background: #fff; padding: 0 2px; }
+.flow-box.highlight { background: #fff7d6; font-weight: 600; }`
+
+    const hasTemplate = !!templateStructure
+    const systemPrompt = hasTemplate ? `당신은 한국 비즈니스 문서 전문 편집자입니다.
+사용자가 "템플릿 구조 HTML"을 제공합니다. 당신의 유일한 임무는:
+**제공된 템플릿 HTML을 그대로 복사한 뒤, 빈 자리(<td></td>, <p></p>, <li></li>)에 원본 내용을 채워 넣는 것** 입니다.
+
+[❗❗❗ 절대 규칙 — 위반 시 실패]
+① 템플릿에 있는 모든 <h1>, <h2>, <h3>, <table>, <tr>, <th>, <td>, <ul>, <ol>, <li>, <p>, <hr> 태그와 그 순서를 **바이트 단위로 동일하게** 유지할 것
+② 템플릿에 <ol>이 있으면 <ol>을 그대로 사용 (<ul>로 바꾸지 말 것). 템플릿에 <ul>이면 <ul> 그대로
+③ 템플릿에 없는 <h2> 섹션을 절대 추가하지 말 것 (예: 템플릿에 없는 "6. 특이사항", "5. 결정 사항 및 후속 과제" 같은 자기만의 구조 금지)
+④ 템플릿에 없는 차트(<div class="chart">), 플로우(<div class="flow">) 삽입 금지
+⑤ 내용이 없어도 템플릿 섹션을 삭제하지 말 것 — "해당 없음" 또는 빈 채로 유지
+⑥ 템플릿 표의 행 수가 부족하면 <tr>을 복제해 추가 가능 (구조는 동일)
+⑦ 마크다운 코드블록 없이, <!DOCTYPE html>...</html> 순수 HTML만 반환
+⑧ <head>의 <style>은 제공된 CSS 그대로 사용 (수정·추가 금지)
+
+[작업 절차]
+1. 템플릿 HTML 전체를 출력 버퍼에 그대로 복사
+2. 원본 내용을 섹션별로 분류 (참석자, 안건, 토의내용, 결정사항 등)
+3. 해당 섹션의 빈 태그에만 텍스트 삽입
+4. 섹션이 비면 "해당 없음" 기입
+5. 새 섹션·차트·그림·아이콘·이모지 추가 금지`
+: `당신은 한국 비즈니스 문서 전문 편집자입니다.
+주어진 내용을 ${tpl.name} 형식의 완전한 HTML 문서로 재편집하여 반환하세요.
+
+[규칙]
+1. <!DOCTYPE html>부터 </html>까지 완전한 HTML 문서 반환
+2. <head>에 <meta charset="utf-8">와 <style> 태그
+3. 숫자·비교는 <table>로, 핵심은 <ul>로
+4. 마크다운 코드블록 없이 순수 HTML만 반환`
+
+    const structureHint = sourceHtml
+      ? `\n[원본 HTML 구조 — 참고용, 표·리스트 맥락 이해에 활용]:\n${sourceHtml.slice(0, 4000)}\n`
+      : ''
+
+    const cssToUse = templateCss || BASE_CSS
+
+    const userPrompt = hasTemplate ? `## 작업: 아래 템플릿 HTML을 복사해서 빈 자리에 원본 내용을 채워 넣기
+
+### 1) 반드시 사용할 CSS (<style> 태그 안에 그대로)
+\`\`\`css
+${cssToUse}
+\`\`\`
+
+### 2) ❗ 반드시 이 뼈대를 그대로 유지할 템플릿 HTML
+\`\`\`html
+${templateStructure}
+\`\`\`
+
+### 3) 위 템플릿의 빈 자리에 채울 원본 내용
+${text.slice(0, 8000)}
+${structureHint}
+### 4) 작업 방법
+- 위 템플릿의 <h1>, <h2>, <h3>, <table>, <ol>, <ul>, <p>, <hr> 태그와 계층·순서를 **그대로** 유지
+- 각 섹션 제목(<h2>참석자</h2> 등)은 **한 글자도 바꾸지 말 것**
+- <td></td>, <p></p>, <li></li> 같은 빈 태그 안에 원본에서 추출한 해당 내용을 넣기
+- 템플릿 표의 행이 부족하면 <tr>을 복제해 추가 (단, 열 구조·class는 동일)
+- 템플릿에 없는 <h2> 섹션·차트·플로우·번호체계("1. 개요", "2. 논의") 추가 금지
+- 추가 지시사항: ${instruction || '(없음)'}
+
+### 5) 출력: <!DOCTYPE html> ... </html> 순수 HTML만 (설명·코드펜스 없이)`
+    : `원본 내용을 "${tpl.name}" 형식으로 재편집해주세요.
+
+형식 지침: ${tpl.prompt}
+추가 지시사항: ${instruction || '기본 형식으로 깔끔하게 정리해주세요'}
+
+CSS:
+<style>${cssToUse}</style>
+${structureHint}
+원본 내용:
+${text.slice(0, 8000)}`
+
+    try {
+      const apiKey = store.get('anthropicKey')
+      if (!apiKey) throw new Error('Claude API 키가 설정되지 않았습니다')
+      const Anthropic = require('@anthropic-ai/sdk')
+      const client = new Anthropic({ apiKey })
+      const response = await client.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 8192,
+        temperature: 0.2,    // 결정적 출력 — 템플릿에서 이탈 최소화
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+      })
+      let html = response.content[0]?.text || ''
+      // 마크다운 코드블록 제거 (AI가 실수로 감쌌을 경우)
+      html = html.replace(/^```html?\s*/i, '').replace(/\s*```\s*$/, '').trim()
+      if (!html.toLowerCase().includes('<!doctype') && !html.toLowerCase().includes('<html')) {
+        html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${cssToUse}</style></head><body>${html}</body></html>`
+      }
+      return html
+    } catch (e) {
+      throw new Error('AI 처리 실패: ' + e.message)
+    }
+  })
+
+  // HTML → DOCX 내보내기
+  ipcMain.handle('document:export-docx', async (_event, { html, fileName }) => {
+    try {
+      const HTMLtoDOCX = require('html-to-docx')
+      const win = getWindow()
+      const baseName = (fileName || '문서').replace(/\.[^.]+$/, '')
+      const { canceled, filePath } = await dialog.showSaveDialog(win, {
+        defaultPath: baseName + '.docx',
+        filters: [{ name: 'Word 문서', extensions: ['docx'] }],
+      })
+      if (canceled || !filePath) return { success: false }
+      const docxBuf = await HTMLtoDOCX(html, null, {
+        table: { row: { cantSplit: true } },
+        footer: false,
+        pageNumber: false,
+      })
+      fs.writeFileSync(filePath, Buffer.from(docxBuf))
+      return { success: true, filePath }
+    } catch (e) {
+      throw new Error('DOCX 내보내기 실패: ' + e.message)
+    }
+  })
+
+  // HTML → HWPX 내보내기 (편집 가능한 텍스트/표 기반)
+  ipcMain.handle('document:export-hwp', async (_event, { html, fileName, templateId }) => {
+    // 1) 번들된 JRE + hwpxlib 경로 탐지 (dev / packaged 양쪽 지원)
+    const resourceRoot = app.isPackaged
+      ? path.join(process.resourcesPath, 'hwpx')
+      : path.join(__dirname, '..', 'resources', 'hwpx')
+    const javaBin = path.join(resourceRoot, 'jre', 'bin', 'java')
+    const hwpxJar = path.join(resourceRoot, 'hwpxlib-1.0.5.jar')
+    const writerClassDir = resourceRoot  // HwpxWriter.class 가 여기 있음
+    const missingBuiltinResources = [javaBin, hwpxJar, path.join(writerClassDir, 'HwpxWriter.class')]
+      .filter(p => !fs.existsSync(p))
+
+    const win = getWindow() || null
+    const baseName = (fileName || '문서').replace(/\.[^.]+$/, '')
+    const { canceled, filePath } = await dialog.showSaveDialog(win, {
+      defaultPath: baseName + '.hwpx',
+      filters: [
+        { name: '한글 문서 (HWPX)', extensions: ['hwpx'] },
+        { name: '한글 문서 (HWP)',  extensions: ['hwp'] },
+      ],
+    })
+    if (canceled || !filePath) return { success: false }
+
+    // 2) 배포 환경에서도 동일하게 동작하도록 번들된 JRE + JS HWPX XML 엔진을 기본 경로로 사용한다.
+    // 사용자의 Python/pandoc 설치 여부와 무관하게 표 병합/선/글자 크기를 같은 방식으로 생성한다.
+    const bundledResult = missingBuiltinResources.length
+      ? { success: false, error: `HWP 생성기 파일 누락: ${missingBuiltinResources.join(', ')}\n앱 재설치 또는 resources/hwpx/ 확인 필요` }
+      : await tryBuiltinHwpxExport(html, filePath, javaBin, hwpxJar, writerClassDir)
+    if (bundledResult.success) {
+      return { success: true, filePath, engine: bundledResult.engine }
+    }
+
+    // 3) 개발 환경에서만 더 풍부한 템플릿 채우기 엔진을 폴백으로 사용한다.
+    // 이 경로는 python-hwpx가 설치된 사용자에게만 동작하므로 기본 품질 기준에는 포함하지 않는다.
+    const templateResult = await tryTemplateHwpxExport(html, filePath, templateId, resourceRoot)
+    if (templateResult.success) {
+      return { success: true, filePath, engine: templateResult.engine, bundledError: bundledResult.error || null }
+    }
+
+    // 4) Pandoc 기반 변환기를 추가 폴백으로 사용한다.
+    // 생성 후 HWPX XML을 보정해 템플릿의 표/정렬/글자 크기를 가능한 한 유지한다.
+    const externalResult = await tryExternalHwpxExport(html, filePath)
+    if (externalResult.success) {
+      return {
+        success: true,
+        filePath,
+        engine: externalResult.engine,
+        bundledError: bundledResult.error || null,
+        templateError: templateResult.error || null,
+      }
+    }
+
+    throw new Error(`HWPX 생성 실패\n${bundledResult.error || templateResult.error || externalResult.error || '알 수 없는 오류'}`)
+  })
+
+  async function tryTemplateHwpxExport(html, outputPath, templateId, resourceRoot) {
+    const tmpPath = path.join(os.tmpdir(), `tidy-doc-${Date.now()}-${Math.random().toString(36).slice(2)}.html`)
+    try {
+      const safeTemplateId = safeFileStem(templateId || 'report')
+      const templatePath = path.join(resourceRoot, 'templates', `${safeTemplateId}.hwpx`)
+      const scriptPath = path.join(resourceRoot, 'hwpx_template_export.py')
+      if (!fs.existsSync(templatePath)) {
+        return { success: false, error: `템플릿 HWPX 파일 없음: ${templatePath}` }
+      }
+      if (!fs.existsSync(scriptPath)) {
+        return { success: false, error: `템플릿 HWPX helper 없음: ${scriptPath}` }
+      }
+
+      const pythonPath = await findPythonWithModule('hwpx')
+      if (!pythonPath) {
+        return { success: false, error: 'python-hwpx 모듈을 import할 수 있는 Python을 찾을 수 없음' }
+      }
+
+      fs.writeFileSync(tmpPath, html, 'utf-8')
+      const result = await runProcess(pythonPath, [
+        scriptPath,
+        '--input-html', tmpPath,
+        '--output', outputPath,
+        '--template-path', templatePath,
+        '--template-id', safeTemplateId,
+      ])
+      const payload = parseProcessJson(result.stdout)
+      if (result.ok && payload?.success && fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
+        await enhanceFilledTemplateHwpx(outputPath, html)
+        return { success: true, engine: payload.engine || 'python-hwpx-template' }
+      }
+      const errorMessage = payload?.error || result.stderr || result.stdout || '템플릿 HWPX 변환 실패'
+      console.warn('[Document] 템플릿 HWPX 변환 실패, 외부 변환 사용:', errorMessage)
+      return { success: false, error: errorMessage }
+    } catch (e) {
+      console.warn('[Document] 템플릿 HWPX 변환 실패, 외부 변환 사용:', e.message)
+      return { success: false, error: e.message }
+    } finally {
+      try { fs.unlinkSync(tmpPath) } catch {}
+    }
+  }
+
+  async function tryBuiltinHwpxExport(html, filePath, javaBin, hwpxJar, writerClassDir) {
+    const { spawn } = require('child_process')
+    try {
+      const blocks = htmlToHwpxBlocks(html)
+      const classpath = `${hwpxJar}${process.platform === 'win32' ? ';' : ':'}${writerClassDir}`
+      await new Promise((resolve, reject) => {
+        const proc = spawn(javaBin, ['-cp', classpath, 'HwpxWriter', filePath], {
+          timeout: 30000,
+        })
+        let stderr = ''
+        proc.stderr?.on('data', d => { stderr += d.toString() })
+        proc.stdin.write('P:\n', 'utf-8')
+        proc.stdin.end()
+        proc.on('exit', code => code === 0
+          ? resolve()
+          : reject(new Error(`HWPX 기본 파일 생성 실패 (종료 코드 ${code})\n${stderr}`)))
+        proc.on('error', reject)
+      })
+      await rewriteHwpxWithBlocks(filePath, blocks)
+      return { success: true, engine: 'bundled-hwpx-js' }
+    } catch (e) {
+      console.warn('[Document] 내장 HWPX 변환 실패, 외부 변환 사용:', e.message)
+      return { success: false, error: e.message }
+    }
+  }
+
+  async function tryExternalHwpxExport(html, outputPath) {
+    const tmpPath = path.join(os.tmpdir(), `tidy-doc-${Date.now()}-${Math.random().toString(36).slice(2)}.html`)
+    try {
+      fs.writeFileSync(tmpPath, html, 'utf-8')
+
+      const cliPath = findExecutable('pypandoc-hwpx')
+      if (cliPath) {
+        const result = await runProcess(cliPath, [tmpPath, '-o', outputPath])
+        if (result.ok && fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
+          await enhanceEditableHwpxStyles(outputPath, html)
+          return { success: true, engine: 'pypandoc-hwpx-enhanced' }
+        }
+        console.warn('[Document] pypandoc-hwpx CLI 실패, 내장 변환 사용:', result.stderr || result.stdout)
+      }
+
+      const pythonPath = await findPythonWithModule('pypandoc_hwpx')
+      if (pythonPath) {
+        const result = await runProcess(pythonPath, ['-m', 'pypandoc_hwpx.cli', tmpPath, '-o', outputPath])
+        if (result.ok && fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
+          await enhanceEditableHwpxStyles(outputPath, html)
+          return { success: true, engine: 'pypandoc-hwpx-enhanced' }
+        }
+        console.warn('[Document] pypandoc_hwpx 모듈 변환 실패, 내장 변환 사용:', result.stderr || result.stdout)
+      }
+    } catch (e) {
+      console.warn('[Document] 외부 HWPX 변환 실패, 내장 변환 사용:', e.message)
+    } finally {
+      try { fs.unlinkSync(tmpPath) } catch {}
+    }
+    return { success: false }
+  }
+
+  const HWPX_STYLE = {
+    char: {
+      body: 7,
+      title: 8,
+      heading2: 9,
+      heading3: 10,
+      boldBody: 11,
+      meta: 12,
+      sectionLabel: 13,
+      tableBody: 14,
+      tableHeader: 15,
+      tableSmall: 16,
+    },
+    para: {
+      title: 20,
+      heading: 21,
+      body: 22,
+      right: 23,
+      list: 24,
+      tableLeft: 25,
+      tableCenter: 26,
+      tableRight: 27,
+    },
+    border: {
+      tableBody: 4,
+      tableHeader: 5,
+      noteBox: 6,
+    },
+  }
+
+  async function enhanceEditableHwpxStyles(filePath, html) {
+    const JSZip = require('jszip')
+    const zip = await JSZip.loadAsync(fs.readFileSync(filePath))
+    const sectionFile = zip.file('Contents/section0.xml')
+    const headerFile = zip.file('Contents/header.xml')
+    const mimeFile = zip.file('mimetype')
+    if (!sectionFile || !headerFile) return
+
+    const tableBlocks = extractHtmlTableBlocks(html)
+    let sectionXml = await sectionFile.async('string')
+    sectionXml = sectionXml.replace(/<\/hp:tr>\s*<\/hp:tr>/g, '</hp:tr>')
+
+    const usedTableBlocks = new Set()
+    sectionXml = sectionXml.replace(/<hp:tbl\b[\s\S]*?<\/hp:tbl>/g, tableXml => {
+      const block = selectHtmlTableBlockForHwpx(tableXml, tableBlocks, usedTableBlocks)
+      return block ? styleEditableTableXml(tableXml, block) : tableXml
+    })
+
+    zip.file('Contents/header.xml', ensureHwpxHeaderStyles(await headerFile.async('string')))
+    zip.file('Contents/section0.xml', sectionXml)
+    if (mimeFile) {
+      zip.file('mimetype', await mimeFile.async('string'), { compression: 'STORE' })
+    }
+    const output = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
+    fs.writeFileSync(filePath, output)
+  }
+
+  async function enhanceFilledTemplateHwpx(filePath, html) {
+    const JSZip = require('jszip')
+    const zip = await JSZip.loadAsync(fs.readFileSync(filePath))
+    const sectionFile = zip.file('Contents/section0.xml')
+    const headerFile = zip.file('Contents/header.xml')
+    const mimeFile = zip.file('mimetype')
+    if (!sectionFile || !headerFile) return
+
+    const tableBlocks = extractHtmlTableBlocks(html)
+    let sectionXml = await sectionFile.async('string')
+    sectionXml = sectionXml.replace(/<\/hp:tr>\s*<\/hp:tr>/g, '</hp:tr>')
+
+    const usedTableBlocks = new Set()
+    sectionXml = sectionXml.replace(/<hp:tbl\b[\s\S]*?<\/hp:tbl>/g, tableXml => {
+      const block = selectHtmlTableBlockForHwpx(tableXml, tableBlocks, usedTableBlocks)
+      return block ? styleEditableTableXml(tableXml, block) : tableXml
+    })
+    sectionXml = styleTemplateParagraphsXml(sectionXml)
+
+    zip.file('Contents/header.xml', ensureHwpxHeaderStyles(await headerFile.async('string')))
+    zip.file('Contents/section0.xml', sectionXml)
+    if (mimeFile) {
+      zip.file('mimetype', await mimeFile.async('string'), { compression: 'STORE' })
+    }
+    const output = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
+    fs.writeFileSync(filePath, output)
+  }
+
+  function styleTemplateParagraphsXml(sectionXml) {
+    const tables = []
+    const protectedXml = sectionXml.replace(/<hp:tbl\b[\s\S]*?<\/hp:tbl>/g, tableXml => {
+      const token = `@@TIDY_HWPX_TABLE_${tables.length}@@`
+      tables.push(tableXml)
+      return token
+    })
+    let firstContentParagraph = true
+    const styledXml = protectedXml.replace(/<hp:p\b[\s\S]*?<\/hp:p>/g, paragraphXml => {
+      if (paragraphXml.includes('<hp:secPr') || paragraphXml.includes('<hp:tbl')) return paragraphXml
+
+      const text = decodeXmlEntities(
+        Array.from(paragraphXml.matchAll(/<hp:t\b[^>]*>([\s\S]*?)<\/hp:t>/g))
+          .map(match => match[1])
+          .join('')
+      ).replace(/\s+/g, ' ').trim()
+      if (!text) return paragraphXml
+
+      let paraPr = HWPX_STYLE.para.body
+      let charPr = HWPX_STYLE.char.body
+      if (firstContentParagraph) {
+        paraPr = HWPX_STYLE.para.title
+        charPr = HWPX_STYLE.char.title
+        firstContentParagraph = false
+      } else if (isTemplateHeadingText(text)) {
+        paraPr = HWPX_STYLE.para.heading
+        charPr = HWPX_STYLE.char.heading2
+      } else if (/^[•-]\s+|^\d+\.\s+/.test(text)) {
+        paraPr = HWPX_STYLE.para.list
+        charPr = HWPX_STYLE.char.body
+      }
+
+      let next = paragraphXml.replace(/<hp:p\b[^>]*>/, tag => {
+        let out = setAttrOnTag(tag, 'paraPrIDRef', paraPr)
+        out = setAttrOnTag(out, 'styleIDRef', '0')
+        return out
+      })
+      next = next.replace(/<hp:run\b[^>]*>/g, tag => setAttrOnTag(tag, 'charPrIDRef', charPr))
+      return next
+    })
+    return styledXml.replace(/@@TIDY_HWPX_TABLE_(\d+)@@/g, (_token, index) => tables[Number(index)] || '')
+  }
+
+  function isTemplateHeadingText(text) {
+    return /^\d+\.\s+/.test(text)
+      || /^(참석자|불참자|안건|토의 내용|결정 사항|차기 회의|신청 방법|유의 사항|문의처|현황|소요 예산|추진 일정)$/.test(text)
+  }
+
+  function decodeXmlEntities(value) {
+    return String(value || '')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&amp;/g, '&')
+  }
+
+  function extractHtmlTableBlocks(html) {
+    try {
+      const { parseDOM } = require('htmlparser2')
+      const dom = parseDOM(String(html || ''), {
+        decodeEntities: true,
+        lowerCaseAttributeNames: true,
+        lowerCaseTags: true,
+      })
+      const body = findFirstTag(dom, 'body')
+      const roots = body?.children || dom
+      const tables = []
+      const walk = (node, context = emptyHtmlContext()) => {
+        if (!node || node.type !== 'tag') return
+        const tag = String(node.name || '').toLowerCase()
+        if (['script', 'style', 'head', 'meta', 'title', 'link'].includes(tag)) return
+        const nextContext = mergeHtmlContext(context, node)
+        if (tag === 'table') {
+          const tableBlock = parseHtmlTableNode(node, nextContext)
+          if (tableBlock.rows.length) tables.push(tableBlock)
+          return
+        }
+        for (const child of node.children || []) walk(child, nextContext)
+      }
+      for (const root of roots) walk(root)
+      return tables
+    } catch (e) {
+      console.warn('[Document] HWPX 표 스타일 추출 실패:', e.message)
+      return []
+    }
+  }
+
+  function selectHtmlTableBlockForHwpx(tableXml, tableBlocks, usedTableBlocks) {
+    if (!tableBlocks.length) return null
+    const targetCols = readHwpxTableColumnCount(tableXml)
+    const targetHeader = extractHwpxTableFirstRowTexts(tableXml)
+    let best = null
+
+    tableBlocks.forEach((block, index) => {
+      if (usedTableBlocks.has(index)) return
+      const blockCols = buildTableLayout(block.rows || []).colCnt
+      if (targetCols && blockCols !== targetCols) return
+      const sourceHeader = tableBlockFirstRowTexts(block)
+      const headerScore = sharedHeaderScore(targetHeader, sourceHeader)
+      const rowScore = Math.min(3, Math.abs(readHwpxTableRowCount(tableXml) - (block.rows?.length || 0)) === 0 ? 3 : 0)
+      const orderScore = Math.max(0, 2 - Math.abs(index - usedTableBlocks.size))
+      const score = headerScore * 10 + rowScore + orderScore + (targetCols === blockCols ? 4 : 0)
+      if (!best || score > best.score) best = { index, block, score, headerScore }
+    })
+
+    if (!best) return null
+    usedTableBlocks.add(best.index)
+    return best.block
+  }
+
+  function readHwpxTableColumnCount(tableXml) {
+    return Number(String(tableXml || '').match(/<hp:tbl\b[^>]*\bcolCnt="(\d+)"/)?.[1] || 0)
+  }
+
+  function readHwpxTableRowCount(tableXml) {
+    return Number(String(tableXml || '').match(/<hp:tbl\b[^>]*\browCnt="(\d+)"/)?.[1] || 0)
+  }
+
+  function extractHwpxTableFirstRowTexts(tableXml) {
+    const firstRow = String(tableXml || '').match(/<hp:tr>[\s\S]*?<\/hp:tr>/)?.[0] || ''
+    return Array.from(firstRow.matchAll(/<hp:tc\b[\s\S]*?<\/hp:tc>/g))
+      .map(match => extractHwpxCellText(match[0]))
+  }
+
+  function tableBlockFirstRowTexts(block) {
+    const layoutRow = buildTableLayout(block.rows || []).rows[0] || []
+    return layoutRow.map(item => item.cell?.text || '')
+  }
+
+  function sharedHeaderScore(left, right) {
+    const leftSet = new Set(left.map(normalizeTableToken).filter(Boolean))
+    const rightSet = new Set(right.map(normalizeTableToken).filter(Boolean))
+    let score = 0
+    for (const value of rightSet) {
+      if (leftSet.has(value)) score += 1
+    }
+    return score
+  }
+
+  function normalizeTableToken(value) {
+    return String(value || '').replace(/\s+/g, '').replace(/[:：]+$/, '').toLowerCase()
+  }
+
+  function styleEditableTableXml(tableXml, block) {
+    const rows = block.rows || []
+    if (!rows.length) return tableXml
+    return tableElementHwpxXml(block, extractHwpxTableId(tableXml) || 1000)
+  }
+
+  function styleEditableCellXml(cellXml, cell, row, width, rowHeight, variant = 'default', layoutCell = null) {
+    const existingText = extractHwpxCellText(cellXml)
+    const isHeader = isTableHeaderCell(cell, row, existingText)
+    const align = cell.align || (isHeader ? 'center' : 'left')
+    const paraPr = align === 'right'
+      ? HWPX_STYLE.para.tableRight
+      : align === 'center' ? HWPX_STYLE.para.tableCenter : HWPX_STYLE.para.tableLeft
+    const charPr = variant === 'sign'
+      ? HWPX_STYLE.char.tableSmall
+      : isHeader || cell.bold ? HWPX_STYLE.char.tableHeader : HWPX_STYLE.char.tableBody
+    const borderFill = isHeader ? HWPX_STYLE.border.tableHeader : HWPX_STYLE.border.tableBody
+    const margin = variant === 'sign'
+      ? { left: 160, right: 160, top: 120, bottom: 120 }
+      : { left: 500, right: 500, top: 180, bottom: 180 }
+
+    let xml = cellXml
+    xml = xml.replace(/<hp:tc\b[^>]*>/, tag => {
+      let next = tag
+      next = setAttrOnTag(next, 'header', isHeader ? '1' : '0')
+      next = setAttrOnTag(next, 'hasMargin', '0')
+      next = setAttrOnTag(next, 'dirty', '1')
+      next = setAttrOnTag(next, 'borderFillIDRef', borderFill)
+      return next
+    })
+    xml = xml.replace(/<hp:subList\b[^>]*>/g, tag => {
+      let next = tag
+      next = setAttrOnTag(next, 'vertAlign', 'CENTER')
+      next = setAttrOnTag(next, 'textWidth', Math.max(1, width - margin.left - margin.right))
+      next = setAttrOnTag(next, 'textHeight', Math.max(1, rowHeight - margin.top - margin.bottom))
+      next = setAttrOnTag(next, 'lineWrap', 'BREAK')
+      return next
+    })
+    xml = xml.replace(/<hp:p\b[^>]*>/g, tag => {
+      let next = tag
+      next = setAttrOnTag(next, 'paraPrIDRef', paraPr)
+      next = setAttrOnTag(next, 'styleIDRef', '0')
+      return next
+    })
+    xml = xml.replace(/<hp:run\b[^>]*>/g, tag => setAttrOnTag(tag, 'charPrIDRef', charPr))
+    xml = xml.replace(/<hp:cellSz\b[^>]*\/>/, tag => {
+      let next = tag
+      next = setAttrOnTag(next, 'width', width)
+      next = setAttrOnTag(next, 'height', rowHeight)
+      return next
+    })
+    if (layoutCell) {
+      xml = xml.replace(/<hp:cellAddr\b[^>]*\/>/, tag => {
+        let next = tag
+        next = setAttrOnTag(next, 'colAddr', layoutCell.colAddr)
+        next = setAttrOnTag(next, 'rowAddr', layoutCell.rowAddr)
+        return next
+      })
+      xml = xml.replace(/<hp:cellSpan\b[^>]*\/>/, tag => {
+        let next = tag
+        next = setAttrOnTag(next, 'colSpan', layoutCell.colspan)
+        next = setAttrOnTag(next, 'rowSpan', layoutCell.rowspan)
+        return next
+      })
+    }
+    xml = xml.replace(
+      /<hp:cellMargin\b[^>]*\/>/,
+      `<hp:cellMargin left="${margin.left}" right="${margin.right}" top="${margin.top}" bottom="${margin.bottom}"/>`
+    )
+    return xml
+  }
+
+  function resolveHwpxTableWidth(block) {
+    const pageTextWidth = 42520
+    if (block.variant === 'sign') return Math.min(12240, pageTextWidth)
+    if (block.widthPercent && block.widthPercent < 100) {
+      return Math.max(8000, Math.min(block.width || pageTextWidth, pageTextWidth))
+    }
+    const requested = block.width || pageTextWidth
+    return Math.max(30000, Math.min(requested, pageTextWidth))
+  }
+
+  function extractHwpxCellText(cellXml) {
+    return decodeXmlEntities(
+      Array.from(String(cellXml || '').matchAll(/<hp:t\b[^>]*>([\s\S]*?)<\/hp:t>/g))
+        .map(match => match[1])
+        .join('')
+    ).replace(/\s+/g, ' ').trim()
+  }
+
+  function extractHwpxTableId(tableXml) {
+    return String(tableXml || '').match(/<hp:tbl\b[^>]*\bid="([^"]+)"/)?.[1] || null
+  }
+
+  function isLikelyTableLabel(text) {
+    const value = String(text || '').replace(/\s+/g, '').replace(/[:：]+$/, '')
+    if (!value) return false
+    return /^(보고일자|보고부서|보고자|결재라인|수신|참조|제목|회의명|일시|장소|사회|기록|대상|내용|참가비|담당|팀장|기관장|No\.?|결정사항|담당자|기한|비고|구분|항목|금액|합계|단계|일정|추진사항|1월|2월|3월|4월)$/.test(value)
+  }
+
+  function isTableHeaderCell(cell, row = [], fallbackText = '') {
+    return !!cell?.header
+      || (row.length > 0 && row.every(c => c.header))
+      || isLikelyTableLabel(cell?.text || fallbackText)
+  }
+
+  function buildTableLayout(rows) {
+    const layoutRows = []
+    let active = []
+    let colCnt = 0
+
+    rows.forEach((row, rowIndex) => {
+      const nextActive = active.map(value => Math.max(0, value - 1))
+      const layoutRow = []
+      let col = 0
+
+      for (const cell of row) {
+        while ((active[col] || 0) > 0) col += 1
+        const colspan = Math.max(1, cell.colspan || 1)
+        const rowspan = Math.max(1, cell.rowspan || 1)
+        layoutRow.push({ cell, rowIndex, colAddr: col, colspan, rowspan })
+        for (let offset = 0; offset < colspan; offset += 1) {
+          nextActive[col + offset] = Math.max(nextActive[col + offset] || 0, rowspan - 1)
+        }
+        col += colspan
+      }
+
+      colCnt = Math.max(colCnt, col, activeTableWidth(active), activeTableWidth(nextActive))
+      layoutRows.push(layoutRow)
+      active = nextActive
+    })
+
+    return { rows: layoutRows, colCnt: Math.max(1, colCnt) }
+  }
+
+  function activeTableWidth(active) {
+    for (let index = active.length - 1; index >= 0; index -= 1) {
+      if ((active[index] || 0) > 0) return index + 1
+    }
+    return 0
+  }
+
+  function countHwpxCells(rowXml) {
+    return (String(rowXml || '').match(/<hp:tc\b/g) || []).length
+  }
+
+  function setFirstTagAttr(xml, tagName, attrName, value) {
+    const re = new RegExp(`<${escapeRegExp(tagName)}\\b[^>]*>`)
+    return xml.replace(re, tag => setAttrOnTag(tag, attrName, value))
+  }
+
+  function setTagAttr(xml, tagName, attrName, value) {
+    return setFirstTagAttr(xml, tagName, attrName, value)
+  }
+
+  function setAttrOnTag(tag, attrName, value) {
+    const attrRe = new RegExp(`\\s${escapeRegExp(attrName)}="[^"]*"`)
+    const serialized = ` ${attrName}="${escapeXmlAttr(value)}"`
+    return attrRe.test(tag)
+      ? tag.replace(attrRe, serialized)
+      : tag.replace(/\/?>$/, end => `${serialized}${end}`)
+  }
+
+  function escapeRegExp(value) {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  }
+
+  function escapeXmlAttr(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+  }
+
+  function safeFileStem(value) {
+    const stem = String(value || '')
+      .trim()
+      .replace(/[^a-zA-Z0-9_-]/g, '')
+      .slice(0, 80)
+    return stem || 'report'
+  }
+
+  function parseProcessJson(stdout) {
+    const text = String(stdout || '').trim()
+    if (!text) return null
+    try {
+      return JSON.parse(text)
+    } catch {}
+    const firstBrace = text.indexOf('{')
+    const lastBrace = text.lastIndexOf('}')
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+      try {
+        return JSON.parse(text.slice(firstBrace, lastBrace + 1))
+      } catch {}
+    }
+    return null
+  }
+
+  async function findPythonWithModule(moduleName) {
+    const pythonNames = process.platform === 'win32'
+      ? ['python.exe', 'python3.exe', 'python']
+      : ['python3', 'python']
+    const explicitCandidates = process.platform === 'win32' ? [] : [
+      '/usr/local/bin/python3',
+      '/Library/Frameworks/Python.framework/Versions/3.13/bin/python3',
+      '/Library/Frameworks/Python.framework/Versions/3.12/bin/python3',
+      '/Library/Frameworks/Python.framework/Versions/3.11/bin/python3',
+      path.join(os.homedir(), 'miniconda3', 'bin', 'python3'),
+      path.join(os.homedir(), 'miniconda3', 'bin', 'python'),
+      '/opt/homebrew/bin/python3',
+      '/usr/bin/python3',
+    ]
+    const candidates = []
+    for (const name of pythonNames) candidates.push(...findExecutables(name))
+    candidates.push(...explicitCandidates)
+
+    const seen = new Set()
+    for (const candidate of candidates) {
+      if (!candidate || seen.has(candidate) || !fs.existsSync(candidate)) continue
+      seen.add(candidate)
+      try {
+        fs.accessSync(candidate, fs.constants.X_OK)
+      } catch {
+        continue
+      }
+      const result = await runProcess(candidate, [
+        '-c',
+        `import importlib.util, sys; sys.exit(0 if importlib.util.find_spec(${JSON.stringify(moduleName)}) else 1)`,
+      ])
+      if (result.ok) return candidate
+    }
+    return null
+  }
+
+  function findExecutables(name) {
+    const pathExts = process.platform === 'win32' ? (process.env.PATHEXT || '.EXE;.CMD;.BAT').split(';') : ['']
+    const pathParts = [
+      ...(process.env.PATH || '').split(path.delimiter),
+      '/usr/local/bin',
+      '/opt/homebrew/bin',
+      '/usr/bin',
+      path.join(os.homedir(), '.local', 'bin'),
+      path.join(os.homedir(), 'Library', 'Python', '3.13', 'bin'),
+      path.join(os.homedir(), 'Library', 'Python', '3.12', 'bin'),
+      path.join(os.homedir(), 'Library', 'Python', '3.11', 'bin'),
+      '/Library/Frameworks/Python.framework/Versions/3.13/bin',
+      '/Library/Frameworks/Python.framework/Versions/3.12/bin',
+      '/Library/Frameworks/Python.framework/Versions/3.11/bin',
+      path.join(os.homedir(), 'miniconda3', 'bin'),
+    ].filter(Boolean)
+
+    const results = []
+    const seen = new Set()
+    for (const dir of pathParts) {
+      for (const ext of pathExts) {
+        const fullPath = path.join(dir, name + ext)
+        if (seen.has(fullPath)) continue
+        seen.add(fullPath)
+        try {
+          fs.accessSync(fullPath, fs.constants.X_OK)
+          results.push(fullPath)
+        } catch {}
+      }
+    }
+    return results
+  }
+
+  function findExecutable(name) {
+    const pathExts = process.platform === 'win32' ? (process.env.PATHEXT || '.EXE;.CMD;.BAT').split(';') : ['']
+    const pathParts = [
+      ...(process.env.PATH || '').split(path.delimiter),
+      '/opt/homebrew/bin',
+      '/usr/local/bin',
+      '/usr/bin',
+      path.join(os.homedir(), '.local', 'bin'),
+      path.join(os.homedir(), 'Library', 'Python', '3.13', 'bin'),
+      path.join(os.homedir(), 'Library', 'Python', '3.12', 'bin'),
+      path.join(os.homedir(), 'Library', 'Python', '3.11', 'bin'),
+      '/Library/Frameworks/Python.framework/Versions/3.13/bin',
+      '/Library/Frameworks/Python.framework/Versions/3.12/bin',
+      '/Library/Frameworks/Python.framework/Versions/3.11/bin',
+    ].filter(Boolean)
+
+    for (const dir of pathParts) {
+      for (const ext of pathExts) {
+        const fullPath = path.join(dir, name + ext)
+        try {
+          fs.accessSync(fullPath, fs.constants.X_OK)
+          return fullPath
+        } catch {}
+      }
+    }
+    return null
+  }
+
+  function runProcess(command, args) {
+    const { spawn } = require('child_process')
+    return new Promise(resolve => {
+      const proc = spawn(command, args, { timeout: 60000 })
+      let stdout = ''
+      let stderr = ''
+      proc.stdout?.on('data', d => { stdout += d.toString() })
+      proc.stderr?.on('data', d => { stderr += d.toString() })
+      proc.on('error', err => resolve({ ok: false, stdout, stderr: err.message }))
+      proc.on('exit', code => resolve({ ok: code === 0, stdout, stderr, code }))
+    })
+  }
+
+  // HTML 문서 → HWPX 구조 블록
+  function htmlToHwpxBlocks(html) {
+    try {
+      const { parseDOM } = require('htmlparser2')
+      const dom = parseDOM(String(html || ''), {
+        decodeEntities: true,
+        lowerCaseAttributeNames: true,
+        lowerCaseTags: true,
+      })
+      const body = findFirstTag(dom, 'body')
+      const roots = body?.children || dom
+      const blocks = []
+      roots.forEach(node => appendHtmlNodeBlocks(node, blocks, emptyHtmlContext()))
+      if (blocks.length) return blocks
+    } catch (e) {
+      console.warn('[Document] HTML 파서 변환 실패, 레거시 변환 사용:', e.message)
+    }
+    return legacyHtmlToHwpxBlocks(html)
+  }
+
+  function legacyHtmlToHwpxBlocks(html) {
+    let s = String(html || '')
+      .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, '')
+      .replace(/<head\b[^>]*>[\s\S]*?<\/head>/gi, '')
+    const body = s.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i)
+    if (body) s = body[1]
+
+    const tables = []
+    s = s.replace(/<table\b[^>]*>[\s\S]*?<\/table>/gi, (tableHtml) => {
+      const token = `@@TIDY_TABLE_${tables.length}@@`
+      tables.push(parseHtmlTable(tableHtml))
+      return `\n${token}\n`
+    })
+    s = s
+      .replace(/<hr\b[^>]*\/?>/gi, '\n@@TIDY_HR@@\n')
+      .replace(/<div\b[^>]*>/gi, '\n')
+      .replace(/<\/div>/gi, '\n')
+
+    const blocks = []
+    const blockRe = /@@TIDY_TABLE_(\d+)@@|@@TIDY_HR@@|<(h[1-6]|p|ul|ol)\b([^>]*)>([\s\S]*?)<\/\2>/gi
+    let m
+    while ((m = blockRe.exec(s)) !== null) {
+      if (m[1] !== undefined) {
+        blocks.push(tables[Number(m[1])])
+        continue
+      }
+      if (m[0] === '@@TIDY_HR@@') {
+        blocks.push({ type: 'hr' })
+        continue
+      }
+      const tag = m[2].toLowerCase()
+      const attrs = m[3] || ''
+      const inner = m[4] || ''
+      if (tag === 'ul' || tag === 'ol') {
+        const items = []
+        inner.replace(/<li\b[^>]*>([\s\S]*?)<\/li>/gi, (_li, liInner) => {
+          const text = stripTags(liInner)
+          if (text) items.push(text)
+          return ''
+        })
+        items.forEach((text, index) => blocks.push({
+          type: 'p',
+          tag: 'li',
+          text: tag === 'ol' ? `${index + 1}. ${text}` : `• ${text}`,
+        }))
+        continue
+      }
+      const text = stripTags(inner)
+      if (!text && tag !== 'p') continue
+      blocks.push({
+        type: 'p',
+        tag,
+        text,
+        align: htmlAlign(attrs, inner),
+        bold: /<(b|strong)\b/i.test(inner),
+      })
+    }
+
+    if (blocks.length === 0) {
+      const text = stripTags(s).replace(/\n{3,}/g, '\n\n').trim()
+      text.split(/\n+/).forEach(p => blocks.push({ type: 'p', tag: 'p', text: p }))
+    }
+    return blocks.length ? blocks : [{ type: 'p', tag: 'p', text: '' }]
+  }
+
+  function emptyHtmlContext() {
+    return { classes: new Set(), tableAlign: null }
+  }
+
+  function findFirstTag(nodes, tagName) {
+    for (const node of nodes || []) {
+      if (isTag(node, tagName)) return node
+      const found = findFirstTag(node.children, tagName)
+      if (found) return found
+    }
+    return null
+  }
+
+  function appendHtmlNodeBlocks(node, blocks, context) {
+    if (!node) return
+    if (node.type === 'text') {
+      const text = normalizeInlineText(node.data)
+      if (text) blocks.push({ type: 'p', tag: 'p', text })
+      return
+    }
+    if (node.type !== 'tag') return
+
+    const tag = String(node.name || '').toLowerCase()
+    if (['script', 'style', 'head', 'meta', 'title', 'link'].includes(tag)) return
+    if (tag === 'br') return
+    if (tag === 'hr') {
+      blocks.push({ type: 'hr' })
+      return
+    }
+
+    const nextContext = mergeHtmlContext(context, node)
+    if (/^h[1-6]$/.test(tag)) {
+      const text = textFromNode(node)
+      if (text) blocks.push(paragraphBlock(node, tag, text, nextContext))
+      return
+    }
+    if (tag === 'p') {
+      blocks.push(paragraphBlock(node, tag, textFromNode(node), nextContext))
+      return
+    }
+    if (tag === 'ul' || tag === 'ol') {
+      appendListBlocks(node, blocks, tag, nextContext)
+      return
+    }
+    if (tag === 'table') {
+      const tableBlock = parseHtmlTableNode(node, nextContext)
+      if (tableBlock.rows.length) blocks.push(tableBlock)
+      return
+    }
+    if (tag === 'div' && shouldRenderAsBox(node)) {
+      blocks.push({
+        type: 'box',
+        text: textFromNode(node),
+        align: htmlAlignFromNode(node, nextContext),
+      })
+      return
+    }
+
+    const before = blocks.length
+    for (const child of node.children || []) appendHtmlNodeBlocks(child, blocks, nextContext)
+    if (blocks.length === before && isBlockLike(tag)) {
+      const text = textFromNode(node)
+      if (text) blocks.push(paragraphBlock(node, 'p', text, nextContext))
+    }
+  }
+
+  function mergeHtmlContext(context, node) {
+    const classes = new Set(context.classes || [])
+    for (const cls of classList(node)) classes.add(cls)
+    const style = attr(node, 'style').toLowerCase()
+    const classNames = attr(node, 'class').toLowerCase()
+    const tableAlign = classNames.includes('sign-wrap') || /justify-content\s*:\s*flex-end|text-align\s*:\s*right/.test(style)
+      ? 'right'
+      : context.tableAlign
+    return { classes, tableAlign }
+  }
+
+  function appendListBlocks(node, blocks, tag, context) {
+    const items = (node.children || []).filter(child => isTag(child, 'li'))
+    const targets = items.length ? items : node.children || []
+    let index = 1
+    for (const item of targets) {
+      if (!isTag(item, 'li')) {
+        appendHtmlNodeBlocks(item, blocks, context)
+        continue
+      }
+      const text = textFromNode(item)
+      blocks.push({
+        type: 'p',
+        tag: 'li',
+        text: tag === 'ol' ? `${index}. ${text || ' '}` : `• ${text || ' '}`,
+        align: 'left',
+      })
+      index += 1
+    }
+  }
+
+  function paragraphBlock(node, tag, text, context) {
+    return {
+      type: 'p',
+      tag,
+      text: text || '',
+      align: htmlAlignFromNode(node, context),
+      bold: hasBoldIntent(node, context),
+      meta: hasClass(node, 'meta'),
+      className: classList(node).join(' '),
+    }
+  }
+
+  function parseHtmlTableNode(tableNode, context) {
+    const rows = []
+    const tableClasses = classList(tableNode)
+    const variant = tableClasses.includes('sign-table') || context.classes?.has('sign-wrap') ? 'sign' : 'default'
+    const align = htmlAlignFromNode(tableNode, context)
+    const widthPercent = readCssPercent(tableNode, 'width')
+    const tableWidth = variant === 'sign'
+      ? 12240
+      : Math.round(42520 * (widthPercent || 100) / 100)
+    for (const rowNode of directTableRowNodes(tableNode)) {
+      const cells = []
+      for (const cellNode of (rowNode.children || []).filter(child => isTag(child, 'th') || isTag(child, 'td'))) {
+        const cellClasses = classList(cellNode)
+        const header = isTag(cellNode, 'th')
+        const text = textFromNode(cellNode)
+        cells.push({
+          text,
+          lines: splitTextLines(text),
+          header,
+          colspan: readSpan(attr(cellNode, 'colspan'), 'colspan'),
+          rowspan: readSpan(attr(cellNode, 'rowspan'), 'rowspan'),
+          align: htmlAlignFromNode(cellNode, context),
+          bold: header || hasBoldIntent(cellNode, context),
+          className: cellClasses.join(' '),
+          widthPercent: readCssPercent(cellNode, 'width'),
+        })
+      }
+      if (cells.length) rows.push(cells)
+    }
+    return {
+      type: 'table',
+      rows,
+      align,
+      variant,
+      width: tableWidth,
+      widthPercent,
+      columnPercents: readTableColumnPercents(tableNode),
+      className: tableClasses.join(' '),
+    }
+  }
+
+  function directTableRowNodes(tableNode) {
+    const rows = []
+    const collect = node => {
+      for (const child of node?.children || []) {
+        if (isTag(child, 'tr')) {
+          rows.push(child)
+          continue
+        }
+        const name = String(child?.name || '').toLowerCase()
+        if (['thead', 'tbody', 'tfoot'].includes(name)) collect(child)
+      }
+    }
+    collect(tableNode)
+    return rows
+  }
+
+  function readTableColumnPercents(tableNode) {
+    const percents = []
+    for (const child of tableNode?.children || []) {
+      if (!isTag(child, 'colgroup')) continue
+      for (const col of child.children || []) {
+        if (isTag(col, 'col')) percents.push(readCssPercent(col, 'width'))
+      }
+    }
+    return percents.some(Boolean) ? percents : null
+  }
+
+  function findDescendantTags(node, tagName) {
+    const found = []
+    function walk(current) {
+      for (const child of current?.children || []) {
+        if (isTag(child, tagName)) found.push(child)
+        else walk(child)
+      }
+    }
+    walk(node)
+    return found
+  }
+
+  function textFromNode(node) {
+    return splitTextLines(rawTextFromNode(node)).join('\n')
+  }
+
+  function rawTextFromNode(node, root = node) {
+    if (!node) return ''
+    if (node.type === 'text') return node.data || ''
+    if (node.type !== 'tag') return ''
+    const tag = String(node.name || '').toLowerCase()
+    if (['script', 'style', 'head'].includes(tag)) return ''
+    if (tag === 'br') return '\n'
+
+    const blockBreak = node !== root && ['p', 'div', 'li', 'tr', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tag)
+    let text = blockBreak ? '\n' : ''
+    for (const child of node.children || []) text += rawTextFromNode(child, root)
+    if (blockBreak) text += '\n'
+    return text
+  }
+
+  function splitTextLines(text) {
+    return String(text || '')
+      .replace(/\u00a0/g, ' ')
+      .split(/\n+/)
+      .map(line => normalizeInlineText(line))
+      .filter(Boolean)
+  }
+
+  function normalizeInlineText(text) {
+    return String(text || '').replace(/[ \t\r\f]+/g, ' ').trim()
+  }
+
+  function htmlAlignFromNode(node, context = emptyHtmlContext()) {
+    const source = `${attr(node, 'class')} ${attr(node, 'style')}`.toLowerCase()
+    if (/text-align\s*:\s*center|\bcenter\b/.test(source)) return 'center'
+    if (/text-align\s*:\s*right|\bright\b/.test(source)) return 'right'
+    return context.tableAlign || 'left'
+  }
+
+  function hasBoldIntent(node, context = emptyHtmlContext()) {
+    if (hasClass(node, 'bold')) return true
+    if (/font-weight\s*:\s*(bold|[6-9]00)/i.test(attr(node, 'style'))) return true
+    if (context.classes?.has('bold')) return true
+    return hasDescendantTag(node, 'b') || hasDescendantTag(node, 'strong')
+  }
+
+  function hasDescendantTag(node, tagName) {
+    for (const child of node?.children || []) {
+      if (isTag(child, tagName) || hasDescendantTag(child, tagName)) return true
+    }
+    return false
+  }
+
+  function shouldRenderAsBox(node) {
+    const classes = classList(node)
+    return classes.includes('box') || classes.includes('contact-box')
+  }
+
+  function isBlockLike(tag) {
+    return ['section', 'article', 'main', 'header', 'footer', 'blockquote', 'div'].includes(tag)
+  }
+
+  function isTag(node, tagName) {
+    return node?.type === 'tag' && String(node.name || '').toLowerCase() === tagName
+  }
+
+  function attr(node, name) {
+    return String(node?.attribs?.[name] || '')
+  }
+
+  function classList(node) {
+    return attr(node, 'class').split(/\s+/).map(c => c.trim()).filter(Boolean)
+  }
+
+  function hasClass(node, className) {
+    return classList(node).includes(className)
+  }
+
+  function parseHtmlTable(tableHtml) {
+    const rows = []
+    tableHtml.replace(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi, (_tr, trInner) => {
+      const cells = []
+      trInner.replace(/<(th|td)\b([^>]*)>([\s\S]*?)<\/\1>/gi, (_cell, tag, attrs, inner) => {
+        const text = stripTags(inner)
+        cells.push({
+          text,
+          header: tag.toLowerCase() === 'th',
+          colspan: readSpan(attrs, 'colspan'),
+          rowspan: readSpan(attrs, 'rowspan'),
+          align: htmlAlign(attrs, inner),
+          bold: tag.toLowerCase() === 'th' || /<(b|strong)\b/i.test(inner),
+        })
+        return ''
+      })
+      if (cells.length) rows.push(cells)
+      return ''
+    })
+    return { type: 'table', rows }
+  }
+
+  function readSpan(attrs, name) {
+    if (/^\d+$/.test(String(attrs || '').trim())) {
+      return Math.max(1, Math.min(12, Number(String(attrs).trim())))
+    }
+    const m = String(attrs || '').match(new RegExp(`${name}\\s*=\\s*["']?(\\d+)`, 'i'))
+    return Math.max(1, Math.min(12, Number(m?.[1] || 1)))
+  }
+
+  function htmlAlign(attrs, inner = '') {
+    const source = `${attrs || ''} ${inner || ''}`.toLowerCase()
+    if (/text-align\s*:\s*center|class\s*=\s*["'][^"']*center/.test(source)) return 'center'
+    if (/text-align\s*:\s*right|class\s*=\s*["'][^"']*right/.test(source)) return 'right'
+    return 'left'
+  }
+
+  function readCssPercent(node, propName) {
+    const attrs = `${attr(node, 'style')} ${attr(node, propName)}`.toLowerCase()
+    const escaped = propName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const styleMatch = attrs.match(new RegExp(`${escaped}\\s*:\\s*([\\d.]+)\\s*%`))
+    if (styleMatch) return clampPercent(Number(styleMatch[1]))
+    const attrMatch = attrs.match(/(^|\s)([\d.]+)\s*%/)
+    return attrMatch ? clampPercent(Number(attrMatch[2])) : null
+  }
+
+  function clampPercent(value) {
+    return Number.isFinite(value) && value > 0 ? Math.max(1, Math.min(100, value)) : null
+  }
+
+  async function rewriteHwpxWithBlocks(filePath, blocks) {
+    const JSZip = require('jszip')
+    const zip = await JSZip.loadAsync(fs.readFileSync(filePath))
+    const sectionFile = zip.file('Contents/section0.xml')
+    const headerFile = zip.file('Contents/header.xml')
+    const mimeFile = zip.file('mimetype')
+    if (!sectionFile || !headerFile) throw new Error('HWPX 기본 XML을 찾을 수 없습니다')
+
+    const sectionXml = await sectionFile.async('string')
+    const headerXml = await headerFile.async('string')
+    const rootMatch = sectionXml.match(/^(<\?xml[^>]*\?>\s*)?(<hs:sec\b[^>]*>)/)
+    const firstPara = sectionXml.match(/<hp:p\b[\s\S]*?<\/hp:p>/)?.[0]
+    if (!rootMatch || !firstPara) throw new Error('HWPX section XML 구조를 해석할 수 없습니다')
+
+    zip.file('Contents/header.xml', ensureHwpxHeaderStyles(headerXml))
+    zip.file(
+      'Contents/section0.xml',
+      `${rootMatch[1] || ''}${rootMatch[2]}${firstPara}${blocksToHwpxXml(blocks)}</hs:sec>`
+    )
+    if (mimeFile) {
+      zip.file('mimetype', await mimeFile.async('string'), { compression: 'STORE' })
+    }
+    const output = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
+    fs.writeFileSync(filePath, output)
+  }
+
+  function ensureHwpxHeaderStyles(headerXml) {
+    let xml = headerXml
+    if (!xml.includes(`id="${HWPX_STYLE.char.body}" height="1000"`)) {
+      xml = bumpItemCnt(xml, 'hh:charProperties', 7)
+      xml = xml.replace('</hh:charProperties>', [
+        charPrXml(HWPX_STYLE.char.body, 1000, false),
+        charPrXml(HWPX_STYLE.char.title, 1500, true),
+        charPrXml(HWPX_STYLE.char.heading2, 1200, true),
+        charPrXml(HWPX_STYLE.char.heading3, 1100, true),
+        charPrXml(HWPX_STYLE.char.boldBody, 1000, true),
+        charPrXml(HWPX_STYLE.char.meta, 900, false, '#555555'),
+        charPrXml(HWPX_STYLE.char.sectionLabel, 950, true),
+        '</hh:charProperties>',
+      ].join(''))
+    }
+    if (!xml.includes(`id="${HWPX_STYLE.char.tableBody}" height="950"`)) {
+      xml = bumpItemCnt(xml, 'hh:charProperties', 3)
+      xml = xml.replace('</hh:charProperties>', [
+        charPrXml(HWPX_STYLE.char.tableBody, 950, false),
+        charPrXml(HWPX_STYLE.char.tableHeader, 950, true),
+        charPrXml(HWPX_STYLE.char.tableSmall, 850, false),
+        '</hh:charProperties>',
+      ].join(''))
+    }
+    if (!xml.includes(`id="${HWPX_STYLE.para.title}" tabPrIDRef="0"`)) {
+      xml = bumpItemCnt(xml, 'hh:paraProperties', 5)
+      xml = xml.replace('</hh:paraProperties>', [
+        paraPrXml(HWPX_STYLE.para.title, 'CENTER', 0, 400),
+        paraPrXml(HWPX_STYLE.para.heading, 'LEFT', 900, 300),
+        paraPrXml(HWPX_STYLE.para.body, 'LEFT', 120, 120),
+        paraPrXml(HWPX_STYLE.para.right, 'RIGHT', 120, 120),
+        paraPrXml(HWPX_STYLE.para.list, 'LEFT', 80, 80, 900),
+        '</hh:paraProperties>',
+      ].join(''))
+    }
+    if (!xml.includes(`id="${HWPX_STYLE.para.tableLeft}" tabPrIDRef="0"`)) {
+      xml = bumpItemCnt(xml, 'hh:paraProperties', 3)
+      xml = xml.replace('</hh:paraProperties>', [
+        paraPrXml(HWPX_STYLE.para.tableLeft, 'LEFT', 0, 0, 0, 135),
+        paraPrXml(HWPX_STYLE.para.tableCenter, 'CENTER', 0, 0, 0, 135),
+        paraPrXml(HWPX_STYLE.para.tableRight, 'RIGHT', 0, 0, 0, 135),
+        '</hh:paraProperties>',
+      ].join(''))
+    }
+    if (!xml.includes(`<hh:borderFill id="${HWPX_STYLE.border.tableBody}"`)) {
+      xml = bumpItemCnt(xml, 'hh:borderFills', 3)
+      xml = xml.replace('</hh:borderFills>', [
+        borderFillXml(HWPX_STYLE.border.tableBody, '#FFFFFF'),
+        borderFillXml(HWPX_STYLE.border.tableHeader, '#E6E6E6'),
+        borderFillXml(HWPX_STYLE.border.noteBox, '#F5F5F5'),
+        '</hh:borderFills>',
+      ].join(''))
+    }
+    return xml
+  }
+
+  function bumpItemCnt(xml, elementName, add) {
+    const re = new RegExp(`(<${elementName}\\b[^>]*itemCnt=")(\\d+)(")`)
+    return xml.replace(re, (_m, a, n, b) => `${a}${Number(n) + add}${b}`)
+  }
+
+  function charPrXml(id, height, bold, color = '#000000') {
+    return `<hh:charPr id="${id}" height="${height}" textColor="${color}" shadeColor="none" useFontSpace="0" useKerning="0" symMark="NONE" borderFillIDRef="2"><hh:fontRef hangul="0" latin="0" hanja="0" japanese="0" other="0" symbol="0" user="0"/><hh:ratio hangul="100" latin="100" hanja="100" japanese="100" other="100" symbol="100" user="100"/><hh:spacing hangul="0" latin="0" hanja="0" japanese="0" other="0" symbol="0" user="0"/><hh:relSz hangul="100" latin="100" hanja="100" japanese="100" other="100" symbol="100" user="100"/><hh:offset hangul="0" latin="0" hanja="0" japanese="0" other="0" symbol="0" user="0"/>${bold ? '<hh:bold/>' : ''}<hh:underline type="NONE" shape="SOLID" color="#000000"/><hh:strikeout shape="NONE" color="#000000"/><hh:outline type="NONE"/><hh:shadow type="NONE" color="#B2B2B2" offsetX="10" offsetY="10"/></hh:charPr>`
+  }
+
+  function paraPrXml(id, align, prev, next, left = 0, lineSpacing = 160) {
+    return `<hh:paraPr id="${id}" tabPrIDRef="0" condense="0" fontLineHeight="0" snapToGrid="1" suppressLineNumbers="0" checked="0"><hh:align horizontal="${align}" vertical="BASELINE"/><hh:heading type="NONE" idRef="0" level="0"/><hh:breakSetting breakLatinWord="KEEP_WORD" breakNonLatinWord="BREAK_WORD" widowOrphan="1" keepWithNext="0" keepLines="0" pageBreakBefore="0" lineWrap="BREAK"/><hh:autoSpacing eAsianEng="1" eAsianNum="1"/><hh:margin><hc:intent value="0" unit="HWPUNIT"/><hc:left value="${left}" unit="HWPUNIT"/><hc:right value="0" unit="HWPUNIT"/><hc:prev value="${prev}" unit="HWPUNIT"/><hc:next value="${next}" unit="HWPUNIT"/></hh:margin><hh:lineSpacing type="PERCENT" value="${lineSpacing}" unit="HWPUNIT"/><hh:border borderFillIDRef="2" offsetLeft="0" offsetRight="0" offsetTop="0" offsetBottom="0" connect="0" ignoreMargin="0"/></hh:paraPr>`
+  }
+
+  function borderFillXml(id, faceColor) {
+    return `<hh:borderFill id="${id}" threeD="0" shadow="0" centerLine="NONE" breakCellSeparateLine="0"><hh:slash type="NONE" Crooked="0" isCounter="0"/><hh:backSlash type="NONE" Crooked="0" isCounter="0"/><hh:leftBorder type="SOLID" width="0.12 mm" color="#555555"/><hh:rightBorder type="SOLID" width="0.12 mm" color="#555555"/><hh:topBorder type="SOLID" width="0.12 mm" color="#555555"/><hh:bottomBorder type="SOLID" width="0.12 mm" color="#555555"/><hh:diagonal type="SOLID" width="0.1 mm" color="#000000"/><hc:fillBrush><hc:winBrush faceColor="${faceColor}" hatchColor="#FF000000" alpha="0"/></hc:fillBrush></hh:borderFill>`
+  }
+
+  function blocksToHwpxXml(blocks) {
+    return blocks.map((block, index) => {
+      if (block.type === 'table') return tableToHwpxXml(block, index)
+      if (block.type === 'box') return boxToHwpxXml(block, index)
+      if (block.type === 'hr') {
+        return paragraphXml('────────────────────────', HWPX_STYLE.para.title, HWPX_STYLE.char.body)
+      }
+      const tag = block.tag || 'p'
+      const className = String(block.className || '')
+      const isNoticeTitle = className.includes('notice-title') || className.includes('gong-header')
+      const isNoticeSub = className.includes('notice-sub')
+      const charPr = tag === 'h1' || isNoticeTitle ? HWPX_STYLE.char.title
+        : tag === 'h2' ? HWPX_STYLE.char.heading2
+        : tag === 'h3' ? HWPX_STYLE.char.heading3
+        : block.meta || isNoticeSub ? HWPX_STYLE.char.meta
+        : block.bold ? HWPX_STYLE.char.boldBody
+        : HWPX_STYLE.char.body
+      const paraPr = tag === 'h1' || isNoticeTitle || isNoticeSub || block.align === 'center' ? HWPX_STYLE.para.title
+        : block.align === 'right' ? HWPX_STYLE.para.right
+        : tag === 'h2' || tag === 'h3' ? HWPX_STYLE.para.heading
+        : tag === 'li' ? HWPX_STYLE.para.list
+        : HWPX_STYLE.para.body
+      const lines = splitTextLines(block.text)
+      if (lines.length <= 1) return paragraphXml(block.text || '', paraPr, charPr)
+      return lines.map(line => paragraphXml(line, paraPr, charPr)).join('')
+    }).join('')
+  }
+
+  function paragraphXml(text, paraPrIDRef = HWPX_STYLE.para.body, charPrIDRef = HWPX_STYLE.char.body) {
+    return `<hp:p paraPrIDRef="${paraPrIDRef}" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="${charPrIDRef}"><hp:t>${escapeXml(text)}</hp:t></hp:run></hp:p>`
+  }
+
+  function tableToHwpxXml(block, index) {
+    const rows = block.rows || []
+    if (!rows.length) return ''
+    const tableParaPr = block.align === 'right'
+      ? HWPX_STYLE.para.right
+      : block.align === 'center' ? HWPX_STYLE.para.title : HWPX_STYLE.para.body
+    return `<hp:p paraPrIDRef="${tableParaPr}" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="${HWPX_STYLE.char.body}">${tableElementHwpxXml(block, 1000 + index)}</hp:run></hp:p>`
+  }
+
+  function tableElementHwpxXml(block, tableId) {
+    const rows = block.rows || []
+    if (!rows.length) return ''
+    const layout = buildTableLayout(rows)
+    const colCnt = layout.colCnt
+    const tableWidth = resolveHwpxTableWidth(block)
+    const colWidths = resolveTableColumnWidths(rows, colCnt, tableWidth, block)
+    const baseRowHeight = block.variant === 'sign' ? 1350 : 1550
+    const rowHeights = tableRowHeights(rows, baseRowHeight)
+    const horzAlign = block.align === 'right' || block.variant === 'sign' ? 'RIGHT' : block.align === 'center' ? 'CENTER' : 'LEFT'
+    let tableRows = ''
+    layout.rows.forEach((layoutRow, rowIndex) => {
+      const row = rows[rowIndex] || []
+      const cells = layoutRow.map(({ cell, colAddr, colspan, rowspan }) => {
+        const width = Math.max(1800, sumColumnWidths(colWidths, colAddr, colspan))
+        const height = spannedRowHeight(rowHeights, rowIndex, rowspan)
+        const isHeader = isTableHeaderCell(cell, row)
+        const borderFill = isHeader
+          ? HWPX_STYLE.border.tableHeader
+          : HWPX_STYLE.border.tableBody
+        const paraPr = cell.align === 'right'
+          ? HWPX_STYLE.para.tableRight
+          : (cell.align === 'center' || isHeader ? HWPX_STYLE.para.tableCenter : HWPX_STYLE.para.tableLeft)
+        const charPr = block.variant === 'sign'
+          ? HWPX_STYLE.char.tableSmall
+          : isHeader || cell.bold ? HWPX_STYLE.char.tableHeader : HWPX_STYLE.char.tableBody
+        const cellParas = cellParagraphsXml(cell, paraPr, charPr)
+        const margin = block.variant === 'sign'
+          ? { left: 160, right: 160, top: 120, bottom: 120 }
+          : { left: 500, right: 500, top: 180, bottom: 180 }
+        return `<hp:tc name="" header="${isHeader ? 1 : 0}" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="${borderFill}"><hp:subList textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="${Math.max(1, width - margin.left - margin.right)}" textHeight="${Math.max(1, height - margin.top - margin.bottom)}" hasTextRef="0" hasNumRef="0">${cellParas}</hp:subList><hp:cellAddr colAddr="${colAddr}" rowAddr="${rowIndex}"/><hp:cellSpan colSpan="${colspan}" rowSpan="${rowspan}"/><hp:cellSz width="${width}" height="${height}"/><hp:cellMargin left="${margin.left}" right="${margin.right}" top="${margin.top}" bottom="${margin.bottom}"/></hp:tc>`
+      }).join('')
+      tableRows += `<hp:tr>${cells}</hp:tr>`
+    })
+    const height = rowHeights.reduce((sum, rowHeight) => sum + rowHeight, 0)
+    return `<hp:tbl id="${escapeXmlAttr(tableId)}" zOrder="0" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" pageBreak="CELL" repeatHeader="${hasHeaderRow(rows) ? 1 : 0}" rowCnt="${rows.length}" colCnt="${colCnt}" cellSpacing="0" borderFillIDRef="${HWPX_STYLE.border.tableBody}" noAdjust="0"><hp:sz width="${tableWidth}" widthRelTo="ABSOLUTE" height="${height}" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="0" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="${horzAlign}" vertOffset="0" horzOffset="0"/><hp:outMargin left="0" right="0" top="0" bottom="850"/><hp:inMargin left="0" right="0" top="0" bottom="0"/>${tableRows}</hp:tbl>`
+  }
+
+  function resolveTableColumnWidths(rows, colCnt, tableWidth, block = {}) {
+    const explicitPercents = Array(colCnt).fill(null)
+    if (Array.isArray(block.columnPercents)) {
+      block.columnPercents.slice(0, colCnt).forEach((width, index) => {
+        if (width) explicitPercents[index] = width
+      })
+    }
+
+    for (const layoutRow of buildTableLayout(rows).rows) {
+      for (const { cell, colAddr, colspan } of layoutRow) {
+        if (!cell.widthPercent) continue
+        if (colspan === 1) {
+          explicitPercents[colAddr] = cell.widthPercent
+          continue
+        }
+        const perColumn = cell.widthPercent / colspan
+        for (let offset = 0; offset < colspan; offset += 1) {
+          if (!explicitPercents[colAddr + offset]) explicitPercents[colAddr + offset] = perColumn
+        }
+      }
+    }
+    const explicitTotal = explicitPercents.reduce((sum, width) => sum + (width || 0), 0)
+    const emptyCount = explicitPercents.filter(width => !width).length
+    const inferredPercents = explicitTotal === 0 ? inferTableColumnPercents(rows, colCnt) : null
+    const fallbackPercent = emptyCount ? Math.max(1, 100 - Math.min(95, explicitTotal)) / emptyCount : 0
+    const percents = explicitPercents.map((width, index) => width || inferredPercents?.[index] || fallbackPercent)
+    const total = percents.reduce((sum, width) => sum + width, 0) || 100
+    const raw = percents.map(width => Math.max(1600, Math.floor(tableWidth * width / total)))
+    const diff = tableWidth - raw.reduce((sum, width) => sum + width, 0)
+    raw[raw.length - 1] = Math.max(1600, raw[raw.length - 1] + diff)
+    return raw
+  }
+
+  function inferTableColumnPercents(rows, colCnt) {
+    if (colCnt === 4 && rows.some(row => isLikelyTableLabel(row[0]?.text) && isLikelyTableLabel(row[2]?.text))) {
+      return [18, 32, 18, 32]
+    }
+    if (colCnt === 2 && rows.some(row => isLikelyTableLabel(row[0]?.text))) {
+      return [24, 76]
+    }
+    if (colCnt === 5 && rows.some(row => /^No\.?$/i.test(String(row[0]?.text || '').trim()))) {
+      return [10, 40, 18, 16, 16]
+    }
+    if (colCnt === 6 && rows.some(row => String(row[0]?.text || '').includes('추진사항'))) {
+      return [28, 12, 12, 12, 12, 24]
+    }
+    return null
+  }
+
+  function sumColumnWidths(widths, start, span) {
+    return widths.slice(start, start + span).reduce((sum, width) => sum + width, 0)
+  }
+
+  function tableRowHeights(rows, baseHeight) {
+    return rows.map(row => tableRowHeight(row, baseHeight))
+  }
+
+  function spannedRowHeight(rowHeights, rowIndex, rowspan) {
+    return rowHeights
+      .slice(rowIndex, rowIndex + Math.max(1, rowspan || 1))
+      .reduce((sum, height) => sum + height, 0)
+  }
+
+  function tableRowHeight(row, baseHeight) {
+    const maxLines = Math.max(1, ...row.map(cell => (cell.lines?.length || splitTextLines(cell.text).length || 1)))
+    return Math.max(baseHeight, baseHeight + (maxLines - 1) * 850)
+  }
+
+  function hasHeaderRow(rows) {
+    return rows.some(row => row.length && row.every(cell => cell.header))
+  }
+
+  function boxToHwpxXml(block, index) {
+    const width = 42520
+    const lines = splitTextLines(block.text)
+    const paras = (lines.length ? lines : ['']).map((line, i) =>
+      paragraphXml(
+        line,
+        block.align === 'center' ? HWPX_STYLE.para.title : block.align === 'right' ? HWPX_STYLE.para.right : HWPX_STYLE.para.body,
+        i === 0 ? HWPX_STYLE.char.boldBody : HWPX_STYLE.char.body
+      )
+    ).join('')
+    const height = Math.max(1700, Math.max(1, lines.length) * 1300)
+    return `<hp:p paraPrIDRef="${HWPX_STYLE.para.body}" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="${HWPX_STYLE.char.body}"><hp:tbl id="${2000 + index}" zOrder="0" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" pageBreak="CELL" repeatHeader="0" rowCnt="1" colCnt="1" cellSpacing="0" borderFillIDRef="${HWPX_STYLE.border.noteBox}" noAdjust="0"><hp:sz width="${width}" widthRelTo="ABSOLUTE" height="${height}" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="0" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="0" right="0" top="0" bottom="1417"/><hp:inMargin left="510" right="510" top="141" bottom="141"/><hp:tr><hp:tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="${HWPX_STYLE.border.noteBox}"><hp:subList textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="${width - 720}" textHeight="0" hasTextRef="0" hasNumRef="0">${paras}</hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="${width}" height="${height}"/><hp:cellMargin left="510" right="510" top="141" bottom="141"/></hp:tc></hp:tr></hp:tbl></hp:run></hp:p>`
+  }
+
+  function cellParagraphsXml(cell, paraPr, charPr) {
+    const lines = cell.lines?.length ? cell.lines : splitTextLines(cell.text)
+    if (!lines.length) return paragraphXml('', paraPr, charPr)
+    return lines.map(line => paragraphXml(line, paraPr, charPr)).join('')
+  }
+
+  function escapeXml(value) {
+    return String(value || '')
+      .replace(/[^\x09\x0A\x0D\x20-\uD7FF\uE000-\uFFFD]/g, '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;')
+  }
+
+  function stripTags(s) {
+    return String(s)
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+      .replace(/\s+/g, ' ')
+      .trim()
+  }
+
+  // HTML → PDF 내보내기 (숨겨진 BrowserWindow 사용)
+  ipcMain.handle('document:export-pdf', async (_event, { html, fileName }) => {
+    const { BrowserWindow: BW } = require('electron')
+    const tmpPath = path.join(os.tmpdir(), 'tidy-doc-' + Date.now() + '.html')
+    let hiddenWin = null
+    try {
+      fs.writeFileSync(tmpPath, html)
+      const win = getWindow()
+      const baseName = (fileName || '문서').replace(/\.[^.]+$/, '')
+      const { canceled, filePath } = await dialog.showSaveDialog(win, {
+        defaultPath: baseName + '.pdf',
+        filters: [{ name: 'PDF', extensions: ['pdf'] }],
+      })
+      if (canceled || !filePath) return { success: false }
+
+      hiddenWin = new BW({ show: false, webPreferences: { nodeIntegration: false, contextIsolation: true } })
+      await hiddenWin.loadFile(tmpPath)
+      const pdfData = await hiddenWin.webContents.printToPDF({ printBackground: true, pageSize: 'A4' })
+      fs.writeFileSync(filePath, pdfData)
+      return { success: true, filePath }
+    } catch (e) {
+      throw new Error('PDF 내보내기 실패: ' + e.message)
+    } finally {
+      try { hiddenWin?.close() } catch {}
+      try { fs.unlinkSync(tmpPath) } catch {}
+    }
+  })
 
 } // end setupIpcHandlers
 

@@ -11,6 +11,11 @@ app/*.db
 app/*.db-shm
 app/*.db-wal
 
+# Local marketplace data
+server/data/*.db
+server/data/*.db-shm
+server/data/*.db-wal
+
 # OS
 .DS_Store
 *.DS_Store
@@ -21,3 +26,7 @@ app/*.db-wal
 
 # Debug logs
 notif-debug.log
+
+# Python caches
+__pycache__/
+*.pyc

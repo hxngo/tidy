@@ -17,6 +17,16 @@ const store = new Store({
     syncIntervalEmail: { type: 'number', default: 300000 },   // 5분
     syncIntervalSlack: { type: 'number', default: 120000 },   // 2분
     scanPaths: { type: 'array', default: [], items: { type: 'string' } }, // 기존 폴더 스캔 경로
+    // anchor-tools 조직 컨텍스트
+    anchorConfig: {
+      type: 'object',
+      default: {
+        enabled: false,
+        orgName: '',
+        customGlossary: '',
+        customFolders: [],
+      },
+    },
   },
 })
 

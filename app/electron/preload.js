@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron')
+const { contextBridge, ipcRenderer, webFrame } = require('electron')
 
 // 특정 핸들러만 제거하는 헬퍼 (removeAllListeners 대신 removeListener 사용)
 function makeListener(channel, callback) {
@@ -166,6 +166,12 @@ contextBridge.exposeInMainWorld('tidy', {
     deleteFile:       (filePath)     => ipcRenderer.invoke('org:delete-file', { filePath }),
   },
 
+  // 앱 레벨 제어
+  app: {
+    setZoom: (factor) => webFrame.setZoomFactor(factor),
+    getZoom: () => webFrame.getZoomFactor(),
+  },
+
   // 개발용 테스트
   dev: {
     injectTest: (params) => ipcRenderer.invoke('dev:injectTest', params),
@@ -184,6 +190,12 @@ contextBridge.exposeInMainWorld('tidy', {
     openInApp: (params) => ipcRenderer.invoke('skill:open-in-app', params),
     openHwpFile: (filePath) => ipcRenderer.invoke('skill:open-hwp-file', { filePath }),
     readFile: (filePath) => ipcRenderer.invoke('skill:read-file', { filePath }),
+    // Phase 2: 파일 분류
+    runFiling: (fileInfo) => ipcRenderer.invoke('skill:run-filing', fileInfo),
+    // Phase 4: 슬라이드 HTML
+    runSlidesHtml: (params) => ipcRenderer.invoke('skill:run-slides-html', params),
+    // 자연어 명령 → 스킬 자동 라우팅
+    command: (query) => ipcRenderer.invoke('skill:command', { query }),
     // 커스텀 스킬
     listCustom: () => ipcRenderer.invoke('skill:list-custom'),
     saveCustom: (skill) => ipcRenderer.invoke('skill:save-custom', skill),
@@ -197,6 +209,20 @@ contextBridge.exposeInMainWorld('tidy', {
     save: (fields) => ipcRenderer.invoke('profile:save', fields),
     nextQuestion: (params) => ipcRenderer.invoke('profile:next-question', params),
     analyze: (params) => ipcRenderer.invoke('profile:analyze', params),
+    scanFiles: (filePaths) => ipcRenderer.invoke('profile:scan-files', { filePaths }),
+    synthesize: (profile) => ipcRenderer.invoke('profile:synthesize', profile),
+  },
+
+  // 문서 편집기
+  document: {
+    openFile:    ()       => ipcRenderer.invoke('document:open-file'),
+    readFile:    (fp)     => ipcRenderer.invoke('document:read-file', fp),
+    readText:    (fp)     => ipcRenderer.invoke('document:read-text', fp),
+    importDocx:  (fp)     => ipcRenderer.invoke('document:import-docx', fp),
+    reorganize:  (params) => ipcRenderer.invoke('document:reorganize', params),
+    exportDocx:  (params) => ipcRenderer.invoke('document:export-docx', params),
+    exportHwp:   (params) => ipcRenderer.invoke('document:export-hwp', params),
+    exportPdf:   (params) => ipcRenderer.invoke('document:export-pdf', params),
   },
 
   // NotebookLM 스킬

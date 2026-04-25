@@ -12,8 +12,9 @@ macOS용 AI 기반 인박스 매니저. 카카오톡, iMessage, Gmail, Slack 등
 - **일정 감지** — 날짜/시간이 언급된 메시지를 캘린더에 자동 등록
 - **Obsidian 연동** — 모든 데이터를 마크다운 파일로 저장 (Obsidian vault 호환)
 - **자연어 명령** — "보고서 마감일 내일로 바꿔줘" 같은 자연어로 태스크 수정
-- **음성 입력** — Whisper 기반 로컬 음성 인식 지원
+- **음성 입력 UI** — 마이크 입력 흐름 지원
 - **AI 스킬** — 요약, 번역, 회의록, 보고서, 예산표, 슬라이드 등 10가지 스킬
+- **문서 탭 HWPX 내보내기** — 앱에 번들된 HWPX 엔진으로 표 선, 글자 크기, 볼드, 병합 셀을 보존해 한글 문서 생성
 - **NotebookLM 스킬** — Google NotebookLM 연동으로 PPTX·MP3·MP4·PNG·CSV 등 실제 파일 생성
 
 ## 지원 소스
@@ -109,6 +110,12 @@ npm run dist
 # 빌드 완료 후 release/Tidy-0.1.0-arm64.dmg 생성
 ```
 
+### HWPX 내보내기
+
+문서 탭의 HWPX 내보내기는 기본적으로 앱에 포함된 `resources/hwpx` 엔진을 사용합니다. 별도 `python-hwpx`, `pandoc`, `pypandoc-hwpx` 설치 없이도 표 선, 셀 병합, 열 너비, 글자 크기, 볼드 스타일이 같은 방식으로 생성됩니다.
+
+배포 빌드에는 `app/resources/hwpx`가 `extraResources`로 포함되어야 합니다. 누락되면 HWPX 내보내기 품질이 떨어지거나 실패할 수 있습니다.
+
 ## 초기 설정
 
 앱 최초 실행 시 온보딩 화면에서 설정합니다.
@@ -182,9 +189,8 @@ tidy/
 ## 기술 스택
 
 - **Frontend** — React, Vite, Tailwind CSS
-- **Backend** — Electron 31, Node.js
+- **Backend** — Electron 41, Node.js
 - **AI** — Claude claude-sonnet-4-5 (Anthropic)
-- **STT** — Whisper (로컬, @xenova/transformers)
 - **DB** — better-sqlite3
 - **파일 파싱** — pdf-parse, mammoth, hwp.js
 - **NotebookLM** — notebooklm-py (Python, 선택)

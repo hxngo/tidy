@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect, useCallback, useMemo, useContext } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
 import InboxCard, { CATEGORY_DESC } from '../components/InboxCard.jsx'
 import { SourceIcon } from '../components/Icons.jsx'
 import { setCustomSkillsCache } from '../components/SkillPanel.jsx'
+import { AIContext } from '../App.jsx'
 
 // 기본 소스 카테고리 (삭제 불가, label/icon은 설정에서 수정 가능)
 const BUILTIN_SOURCES = [
@@ -124,6 +125,9 @@ function getSourceId(source = '', allSources = []) {
 
 export default function Inbox({ highlightItemId, onHighlightConsumed }) {
   const navigate = useNavigate()
+  const location = useLocation()
+  const [priorityFilter, setPriorityFilter] = useState(location.state?.priorityFilter || null)
+  const { setCtx } = useContext(AIContext)
   const [items, setItems] = useState([])
   const [statusFilter, setStatusFilter] = useState('all')
   const [sourceFilter, setSourceFilter] = useState('all')
@@ -141,13 +145,25 @@ export default function Inbox({ highlightItemId, onHighlightConsumed }) {
   const [trashLoading, setTrashLoading] = useState(false)
   const [emptyTrashConfirm, setEmptyTrashConfirm] = useState(false)
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
-  // 커스텀 스킬 (InboxCard quick skill 버튼에 노출)
-  const [customSkills, setCustomSkills] = useState([])
   // 커스텀/자동감지 소스 카테고리 (BUILTIN과 병합해서 사용)
   const [customSources, setCustomSources] = useState([])
 
   // 현재 활성화된 전체 소스 목록 (builtin + custom)
   const allSources = [...BUILTIN_SOURCES, ...customSources]
+
+  // AI 컨텍스트: modalItem이 변경될 때마다 AIContext 업데이트
+  useEffect(() => {
+    if (modalItem) {
+      setCtx({ type: 'inbox', item: modalItem })
+    } else {
+      setCtx(null)
+    }
+  }, [modalItem, setCtx])
+
+  // 언마운트 시 컨텍스트 초기화
+  useEffect(() => {
+    return () => setCtx(null)
+  }, [setCtx])
 
   const loadItems = useCallback(async () => {
     try {
@@ -198,9 +214,8 @@ export default function Inbox({ highlightItemId, onHighlightConsumed }) {
 
   useEffect(() => {
     loadSources().then(() => loadItems())
-    // 커스텀 스킬 로드 (InboxCard quick 버튼용)
     window.tidy?.skills.listCustom?.().then(list => {
-      if (Array.isArray(list)) { setCustomSkills(list); setCustomSkillsCache(list) }
+      if (Array.isArray(list)) setCustomSkillsCache(list)
     }).catch(() => {})
 
     const unsub = window.tidy?.inbox.onNewItem((newItem) => {
@@ -422,13 +437,18 @@ export default function Inbox({ highlightItemId, onHighlightConsumed }) {
     [searchFiltered, sourceFilter, allSources]
   )
 
+  const priorityFiltered = useMemo(
+    () => priorityFilter ? sourceFiltered.filter(i => i.priority === priorityFilter) : sourceFiltered,
+    [sourceFiltered, priorityFilter]
+  )
+
   const activeItems = useMemo(
-    () => sortItems(sourceFiltered.filter((item) => item.status !== 'done'), sortBy),
-    [sourceFiltered, sortBy]
+    () => sortItems(priorityFiltered.filter((item) => item.status !== 'done'), sortBy),
+    [priorityFiltered, sortBy]
   )
   const doneItems = useMemo(
-    () => sortItems(sourceFiltered.filter((item) => item.status === 'done'), sortBy),
-    [sourceFiltered, sortBy]
+    () => sortItems(priorityFiltered.filter((item) => item.status === 'done'), sortBy),
+    [priorityFiltered, sortBy]
   )
 
   // 상단 탭이 '완료'일 때는 완료 항목만, 그 외엔 미완료만
@@ -446,6 +466,17 @@ export default function Inbox({ highlightItemId, onHighlightConsumed }) {
             <span className="text-[10px] font-semibold bg-[#3a3a3e] text-[#e2e2ea] px-1.5 py-0.5 rounded-full leading-none">
               {newCount}
             </span>
+          )}
+          {priorityFilter === 'high' && (
+            <button
+              onClick={() => setPriorityFilter(null)}
+              className="flex items-center gap-1 text-[10px] font-medium text-red-400 bg-red-900/20 border border-red-700/40 px-2 py-0.5 rounded-full hover:bg-red-900/35 transition-colors"
+            >
+              긴급만 보기
+              <svg width="8" height="8" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <path d="M2 2l12 12M14 2L2 14"/>
+              </svg>
+            </button>
           )}
         </div>
         <div className="no-drag flex items-center gap-2">
@@ -701,7 +732,6 @@ export default function Inbox({ highlightItemId, onHighlightConsumed }) {
                 onRestore={handleRestore}
                 onDelete={handleDelete}
                 onClick={() => openModal(item)}
-                customSkills={customSkills}
               />
             ))}
 
@@ -742,8 +772,7 @@ export default function Inbox({ highlightItemId, onHighlightConsumed }) {
                           setModalItem(item)
                           setReplyState({ loading: false, draft: null, copied: false })
                         }}
-                        customSkills={customSkills}
-                      />
+                              />
                     ))}
                   </div>
                 )}

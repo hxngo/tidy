@@ -1030,7 +1030,8 @@ function saveUserProfile(profile) {
 
 // ─── Org Config (회사/부서/공유 볼트) ────────────────────────────
 function getOrgConfig() {
-  return store.get('orgConfig') || { company: '', department: '', sharedVaultPath: '' }
+  const defaults = { company: '', department: '', sharedVaultPath: '', customGlossary: '', customFolders: [] }
+  return { ...defaults, ...store.get('orgConfig') }
 }
 
 function setOrgConfig(config) {
@@ -1183,6 +1184,17 @@ function createSharedTask({ title, due_date = null, person = null, scope, depart
 // 공유 파일 삭제 (경로 직접 전달)
 function deleteSharedFile(filePath) {
   if (!filePath || !fs.existsSync(filePath)) return false
+  const { sharedVaultPath } = getOrgConfig()
+  if (!sharedVaultPath) throw new Error('공유 볼트 경로가 설정되지 않았습니다')
+
+  const root = fs.realpathSync(sharedVaultPath)
+  const target = fs.realpathSync(filePath)
+  const rel = path.relative(root, target)
+  const isInsideSharedVault = rel && !rel.startsWith('..') && !path.isAbsolute(rel)
+  if (!isInsideSharedVault || path.extname(target).toLowerCase() !== '.md') {
+    throw new Error('공유 볼트 내부 Markdown 파일만 삭제할 수 있습니다')
+  }
+
   fs.unlinkSync(filePath)
   return true
 }
@@ -1373,4 +1385,12 @@ module.exports = {
   getCustomSkills,
   saveCustomSkill,
   deleteCustomSkill,
+  saveProfileContext,
+}
+
+function saveProfileContext(markdown) {
+  ensureDir(getVaultPath())
+  const filePath = path.join(getVaultPath(), 'profile_context.md')
+  fs.writeFileSync(filePath, markdown, 'utf-8')
+  console.log('[Vault] profile_context.md 저장')
 }
