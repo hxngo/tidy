@@ -2197,9 +2197,10 @@ function setupIpcHandlers(ipcMain, getWindow) {
     const { canceled, filePaths } = await dialog.showOpenDialog(win, {
       title: '문서 열기',
       filters: [
-        { name: '지원 문서', extensions: ['hwp', 'docx', 'txt', 'md', 'html', 'htm'] },
+        { name: '지원 문서', extensions: ['hwp', 'docx', 'pdf', 'txt', 'md', 'html', 'htm'] },
         { name: 'HWP 문서',  extensions: ['hwp'] },
         { name: 'Word 문서', extensions: ['docx'] },
+        { name: 'PDF 문서',  extensions: ['pdf'] },
         { name: '텍스트',    extensions: ['txt', 'md'] },
         { name: 'HTML',     extensions: ['html', 'htm'] },
       ],
@@ -2250,9 +2251,120 @@ function setupIpcHandlers(ipcMain, getWindow) {
     }
   })
 
+  // PDF → HTML/text/IR — 회의 중 빠르게 쓸 수 있도록 텍스트 기반 구조를 즉시 만든다.
+  ipcMain.handle('document:import-pdf', async (_event, filePathOrBytes) => {
+    try {
+      const pdfParse = require('pdf-parse')
+      const buffer = typeof filePathOrBytes === 'string'
+        ? fs.readFileSync(filePathOrBytes)
+        : Buffer.from(filePathOrBytes)
+      let data
+      if (typeof pdfParse === 'function') {
+        data = await pdfParse(buffer)
+      } else {
+        const parser = new pdfParse.PDFParse({ data: buffer })
+        try { data = await parser.getText() }
+        finally { await parser.destroy?.() }
+      }
+      const text = String(data?.text || '').replace(/\r/g, '').replace(/\n{3,}/g, '\n\n').trim()
+      if (!text) throw new Error('PDF에서 텍스트를 추출할 수 없습니다')
+      return {
+        text,
+        html: documentTextToHtmlForImport(text),
+        ir: documentTextToIrForImport(text, { format: 'pdf' }),
+      }
+    } catch (e) {
+      console.error('[Document] PDF 변환 오류:', e.message)
+      throw new Error('PDF 변환 실패: ' + e.message)
+    }
+  })
+
+  function documentEscapeHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;')
+  }
+
+  function documentTextToIrForImport(text, meta = {}) {
+    const blocks = []
+    const lines = String(text || '').split(/\n+/).map(line => line.trim()).filter(Boolean)
+    for (const line of lines) {
+      const cells = line.includes('\t')
+        ? line.split('\t').map(s => s.trim()).filter(Boolean)
+        : (/\S\s{2,}\S/.test(line) ? line.split(/\s{2,}/).map(s => s.trim()).filter(Boolean) : [])
+      if (cells.length >= 2) {
+        blocks.push({ type: 'table', rows: [cells.map(text => ({ text }))] })
+      } else if (/^(#{1,6})\s+/.test(line) || (/^\d+(?:\.\d+)*[.)]?\s+/.test(line) && line.length <= 90)) {
+        blocks.push({ type: 'heading', level: 2, text: line.replace(/^#{1,6}\s+/, '') })
+      } else if (/^([-*•]|\d+[.)])\s+/.test(line)) {
+        blocks.push({ type: 'list', ordered: /^\d/.test(line), items: [line.replace(/^([-*•]|\d+[.)])\s+/, '')] })
+      } else {
+        blocks.push({ type: 'paragraph', text: line })
+      }
+    }
+    return {
+      version: '1.0',
+      source: meta,
+      blocks,
+      stats: {
+        headings: blocks.filter(b => b.type === 'heading').length,
+        paragraphs: blocks.filter(b => b.type === 'paragraph').length,
+        tables: blocks.filter(b => b.type === 'table').length,
+        lists: blocks.filter(b => b.type === 'list').length,
+      },
+    }
+  }
+
+  function documentTextToHtmlForImport(text) {
+    const ir = documentTextToIrForImport(text)
+    const body = ir.blocks.map(block => {
+      if (block.type === 'heading') return `<h2>${documentEscapeHtml(block.text)}</h2>`
+      if (block.type === 'paragraph') return `<p>${documentEscapeHtml(block.text)}</p>`
+      if (block.type === 'list') {
+        const tag = block.ordered ? 'ol' : 'ul'
+        return `<${tag}>${block.items.map(item => `<li>${documentEscapeHtml(item)}</li>`).join('')}</${tag}>`
+      }
+      if (block.type === 'table') {
+        return `<table>${block.rows.map(row => `<tr>${row.map(cell => `<td>${documentEscapeHtml(cell.text)}</td>`).join('')}</tr>`).join('')}</table>`
+      }
+      return ''
+    }).join('\n')
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+body { font-family: '맑은 고딕', 'Malgun Gothic', sans-serif; font-size: 10pt; line-height: 1.8; padding: 50px 70px; color: #111; }
+h1 { text-align:center; font-size:15pt; } h2 { font-size:12pt; margin:20px 0 8px; border-bottom:1.5px solid #333; padding-bottom:3px; }
+p { margin:5px 0; } table { border-collapse:collapse; width:100%; margin:10px 0; } td, th { border:1px solid #555; padding:5px 9px; font-size:9.5pt; }
+ul, ol { margin:6px 0 6px 22px; }
+</style></head><body>${body}</body></html>`
+  }
+
+  function buildDocumentKnowledgeContext(kbContext = null) {
+    const orgConfig = { ...(vault.getOrgConfig?.() || {}), ...(kbContext || {}) }
+    const sections = []
+    const orgLines = [
+      orgConfig.company ? `회사/기관: ${orgConfig.company}` : '',
+      orgConfig.department ? `부서: ${orgConfig.department}` : '',
+      orgConfig.orgName ? `조직명: ${orgConfig.orgName}` : '',
+    ].filter(Boolean)
+    if (orgLines.length) sections.push(`[조직 정보]\n${orgLines.join('\n')}`)
+    if (orgConfig.customGlossary?.trim()) sections.push(`[용어집/고유명사]\n${orgConfig.customGlossary.trim().slice(0, 2500)}`)
+    if (Array.isArray(orgConfig.customFolders) && orgConfig.customFolders.length) {
+      sections.push(`[조직 폴더/업무 구조]\n${orgConfig.customFolders.slice(0, 30).map(v => `- ${v}`).join('\n')}`)
+    }
+    try {
+      const profilePath = path.join(vault.getVaultPath(), 'profile_context.md')
+      if (fs.existsSync(profilePath)) {
+        sections.push(`[검증된 사용자 업무 맥락]\n${fs.readFileSync(profilePath, 'utf-8').slice(0, 2500)}`)
+      }
+    } catch {}
+    return sections.join('\n\n').trim()
+  }
+
   // AI 재편집 — Claude가 템플릿에 맞게 HTML 재구성
   ipcMain.handle('document:reorganize', async (_event, {
-    text, sourceHtml, templateId, instruction,
+    text, sourceHtml, documentIr, mode, kbContext, templateId, instruction,
     templateStructure, templateCss, templateName,
   }) => {
     const TEMPLATES_MAP = {
@@ -2306,8 +2418,22 @@ hr { border: none; border-top: 1px solid #ccc; margin: 18px 0; }
 .flow-box + .flow-box::before { content: "▶"; position: absolute; left: -10px; top: 50%; transform: translateY(-50%); font-size: 11pt; color: #555; background: #fff; padding: 0 2px; }
 .flow-box.highlight { background: #fff7d6; font-weight: 600; }`
 
-    const hasTemplate = !!templateStructure
-    const systemPrompt = hasTemplate ? `당신은 한국 비즈니스 문서 전문 편집자입니다.
+    const activeMode = mode === 'preserve' ? 'preserve' : 'template'
+    const hasTemplate = activeMode === 'template' && !!templateStructure
+    const knowledgeContext = buildDocumentKnowledgeContext(kbContext)
+    const irHint = documentIr ? `\n[구조화 JSON IR — 제목/문단/표/리스트/강조 분석 결과]\n${JSON.stringify(documentIr).slice(0, 6000)}\n` : ''
+    const kbHint = knowledgeContext ? `\n[Knowledge Base — 고유명사/조직/사업 정보. 충돌 시 이 내용을 우선]\n${knowledgeContext}\n` : ''
+
+    const systemPrompt = activeMode === 'preserve' ? `당신은 한국 비즈니스 문서 전문 편집자입니다.
+원본 HTML 구조를 최대한 유지하면서 사용자의 자연어 지시사항만 반영합니다.
+
+[규칙]
+1. 출력은 반드시 <!DOCTYPE html>부터 </html>까지 완전한 HTML
+2. 원본의 제목, 표, 리스트, 강조, 정렬 구조를 가능한 한 유지
+3. 사용자가 요구한 부분만 수정하고 불필요한 재작성 금지
+4. Knowledge Base의 조직명, 고유명사, 용어는 임의로 바꾸지 말 것
+5. 마크다운 코드블록 없이 순수 HTML만 반환`
+    : hasTemplate ? `당신은 한국 비즈니스 문서 전문 편집자입니다.
 사용자가 "템플릿 구조 HTML"을 제공합니다. 당신의 유일한 임무는:
 **제공된 템플릿 HTML을 그대로 복사한 뒤, 빈 자리(<td></td>, <p></p>, <li></li>)에 원본 내용을 채워 넣는 것** 입니다.
 
@@ -2342,7 +2468,27 @@ hr { border: none; border-top: 1px solid #ccc; margin: 18px 0; }
 
     const cssToUse = templateCss || BASE_CSS
 
-    const userPrompt = hasTemplate ? `## 작업: 아래 템플릿 HTML을 복사해서 빈 자리에 원본 내용을 채워 넣기
+    const userPrompt = activeMode === 'preserve' ? `## 작업: 원본 구조를 유지한 채 자연어 지시사항 반영
+
+### 1) 사용할 CSS
+\`\`\`css
+${cssToUse}
+\`\`\`
+
+### 2) 원본 HTML
+\`\`\`html
+${String(sourceHtml || '').slice(0, 12000)}
+\`\`\`
+
+### 3) 원본 텍스트
+${text.slice(0, 8000)}
+${irHint}
+${kbHint}
+### 4) 지시사항
+${instruction || '원본 구조를 유지하면서 읽기 좋게 정리'}
+
+### 5) 출력: <!DOCTYPE html> ... </html> 순수 HTML만`
+    : hasTemplate ? `## 작업: 아래 템플릿 HTML을 복사해서 빈 자리에 원본 내용을 채워 넣기
 
 ### 1) 반드시 사용할 CSS (<style> 태그 안에 그대로)
 \`\`\`css
@@ -2357,6 +2503,8 @@ ${templateStructure}
 ### 3) 위 템플릿의 빈 자리에 채울 원본 내용
 ${text.slice(0, 8000)}
 ${structureHint}
+${irHint}
+${kbHint}
 ### 4) 작업 방법
 - 위 템플릿의 <h1>, <h2>, <h3>, <table>, <ol>, <ul>, <p>, <hr> 태그와 계층·순서를 **그대로** 유지
 - 각 섹션 제목(<h2>참석자</h2> 등)은 **한 글자도 바꾸지 말 것**
@@ -2374,6 +2522,8 @@ ${structureHint}
 CSS:
 <style>${cssToUse}</style>
 ${structureHint}
+${irHint}
+${kbHint}
 원본 내용:
 ${text.slice(0, 8000)}`
 
@@ -2398,6 +2548,90 @@ ${text.slice(0, 8000)}`
       return html
     } catch (e) {
       throw new Error('AI 처리 실패: ' + e.message)
+    }
+  })
+
+  // 현재 HTML 또는 선택 영역에 자연어 명령을 적용한다.
+  ipcMain.handle('document:edit-html', async (_event, {
+    html, selectedHtml, selectedText, instruction, documentIr, kbContext,
+  }) => {
+    try {
+      const apiKey = store.get('anthropicKey')
+      if (!apiKey) throw new Error('Claude API 키가 설정되지 않았습니다')
+      const Anthropic = require('@anthropic-ai/sdk')
+      const client = new Anthropic({ apiKey })
+      const hasSelection = !!String(selectedText || selectedHtml || '').trim()
+      const knowledgeContext = buildDocumentKnowledgeContext(kbContext)
+      const system = `당신은 HTML 기반 문서 자동화 편집 엔진입니다.
+사용자의 자연어 명령을 HTML 구조 변경으로 변환합니다.
+
+[규칙]
+1. 표, 리스트, 제목, 볼드, 정렬 같은 구조 정보를 유지하거나 명령에 맞게 변경
+2. Knowledge Base의 조직명, 고유명사, 사업 정보는 임의 변경 금지
+3. 설명 없이 JSON만 반환
+4. 선택 영역이 있으면 {"replacementHtml":"..."}만 반환
+5. 선택 영역이 없으면 {"html":"<!DOCTYPE html>..."}만 반환`
+
+      const user = `## 명령
+${instruction}
+
+## 선택 영역 여부
+${hasSelection ? '있음 — 선택 영역만 수정' : '없음 — 문서 전체 수정'}
+
+## 선택 영역 HTML
+\`\`\`html
+${String(selectedHtml || '').slice(0, 5000)}
+\`\`\`
+
+## 선택 영역 텍스트
+${String(selectedText || '').slice(0, 3000)}
+
+## 전체 문서 HTML
+\`\`\`html
+${String(html || '').slice(0, 16000)}
+\`\`\`
+
+## 구조 JSON IR
+\`\`\`json
+${documentIr ? JSON.stringify(documentIr).slice(0, 6000) : '{}'}
+\`\`\`
+
+## Knowledge Base
+${knowledgeContext || '(없음)'}`
+
+      const response = await client.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: hasSelection ? 4096 : 8192,
+        temperature: 0.15,
+        system,
+        messages: [{ role: 'user', content: user }],
+      })
+      const raw = String(response.content[0]?.text || '').trim()
+        .replace(/^```json\s*/i, '')
+        .replace(/^```\s*/i, '')
+        .replace(/\s*```\s*$/i, '')
+      let payload = null
+      try { payload = JSON.parse(raw) }
+      catch { payload = parseProcessJson(raw) }
+
+      if (hasSelection) {
+        const replacementHtml = payload?.replacementHtml || raw
+        return {
+          replacementHtml: String(replacementHtml)
+            .replace(/^```html?\s*/i, '')
+            .replace(/\s*```\s*$/i, '')
+            .trim(),
+        }
+      }
+
+      let nextHtml = payload?.html || raw
+      nextHtml = String(nextHtml).replace(/^```html?\s*/i, '').replace(/\s*```\s*$/i, '').trim()
+      if (!/^<!doctype|<html/i.test(nextHtml)) {
+        nextHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${nextHtml}</body></html>`
+      }
+      return { html: nextHtml }
+    } catch (e) {
+      throw new Error('자연어 수정 실패: ' + e.message)
     }
   })
 
