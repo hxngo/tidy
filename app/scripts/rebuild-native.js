@@ -14,7 +14,12 @@ const rebuildArgs = [
 function runElectronRequireCheck() {
   return spawnSync(electronPath, [
     '-e',
-    "require('better-sqlite3')",
+    [
+      "const Database = require('better-sqlite3')",
+      "const db = new Database(':memory:')",
+      "db.prepare('select 1').get()",
+      "db.close()",
+    ].join(';'),
   ], {
     env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
     stdio: 'pipe',
