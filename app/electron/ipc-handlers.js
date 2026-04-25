@@ -2928,9 +2928,33 @@ ${text.slice(0, 8000)}`
   }
 
   function isTableHeaderCell(cell, row = [], fallbackText = '') {
+    const text = cell?.text || fallbackText
+    const rowKind = classifyTableRow(row)
+    if (rowKind === 'keyValue') return isLikelyTableLabel(text)
+    if (rowKind === 'header') return true
     return !!cell?.header
-      || (row.length > 0 && row.every(c => c.header))
-      || isLikelyTableLabel(cell?.text || fallbackText)
+  }
+
+  function classifyTableRow(row = []) {
+    if (!row.length) return 'body'
+    if (isKeyValueTableRow(row)) return 'keyValue'
+    if (row.every(cell => cell.header)) return 'header'
+    if (row.length > 1 && row.every(cell => isLikelyTableLabel(cell.text))) return 'header'
+    return 'body'
+  }
+
+  function isKeyValueTableRow(row = []) {
+    if (row.length < 2) return false
+    const labels = row.map(cell => isLikelyTableLabel(cell.text))
+    if (!labels[0] || !labels.some(Boolean) || !labels.some(label => !label)) return false
+
+    const alternatingFromFirst = labels.every((isLabel, index) => (
+      index % 2 === 0 ? isLabel : !isLabel
+    ))
+    if (alternatingFromFirst) return true
+
+    const labelCount = labels.filter(Boolean).length
+    return labelCount <= Math.ceil(row.length / 2)
   }
 
   function buildTableLayout(rows) {
@@ -3812,7 +3836,7 @@ ${text.slice(0, 8000)}`
   }
 
   function hasHeaderRow(rows) {
-    return rows.some(row => row.length && row.every(cell => cell.header))
+    return rows.some(row => classifyTableRow(row) === 'header')
   }
 
   function boxToHwpxXml(block, index) {
