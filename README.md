@@ -86,6 +86,31 @@ Google NotebookLM을 통해 실제 파일을 생성합니다. 처음 사용 시 
 | `.eml` | 내장 파서 | — |
 | 이미지 | Claude Vision | — |
 
+## 문서 탭
+
+문서 탭에서는 원본 문서를 불러온 뒤 보고서, 공문, 회의록, 제안서, 안내문 템플릿에 맞게 재구성하고 결과물을 내보낼 수 있습니다.
+
+| 기능 | 설명 |
+|------|------|
+| 템플릿 재구성 | AI가 선택한 템플릿 구조에 맞춰 제목, 본문, 표를 다시 정리 |
+| HTML 미리보기 | 문서 편집 전후 결과를 앱 안에서 확인 |
+| DOCX 내보내기 | Word 문서로 저장 |
+| PDF 내보내기 | 현재 문서 화면을 PDF로 저장 |
+| HWPX 내보내기 | 한글 문서 형식으로 저장 |
+
+### HWPX 내보내기 품질
+
+HWPX 내보내기는 기본적으로 앱에 포함된 `bundled-hwpx-js` 엔진을 사용합니다. 다른 사용자가 별도 프로그램을 설치하지 않아도 같은 방식으로 문서가 생성되도록, 필요한 HWPX writer, JRE, 템플릿 파일을 `app/resources/hwpx`에 함께 포함했습니다.
+
+지원하는 HWPX 스타일 보존 항목:
+
+- 표 선과 셀 배경
+- 표 열 너비와 전체 표 너비
+- `colspan`, `rowspan` 병합 셀
+- 제목, 소제목, 본문, 표 헤더의 글자 크기
+- 볼드체와 표 헤더 강조
+- 이미지가 아닌 실제 텍스트 기반 HWPX 출력
+
 ## 요구 사항
 
 - macOS 13 (Ventura) 이상
@@ -147,6 +172,8 @@ Slack API 토큰 입력. [Slack App 생성](https://api.slack.com/apps) 후 `cha
 ```
 tidy/
 └── app/
+    ├── resources/
+    │   └── hwpx/                 # 번들 HWPX writer, JRE, 템플릿
     ├── electron/
     │   ├── core/
     │   │   ├── ai.js              # Claude API 메시지 분석 + 스킬 프롬프트
@@ -173,6 +200,8 @@ tidy/
         │   ├── Tasks.jsx          # 태스크
         │   ├── People.jsx         # 인물
         │   ├── Calendar.jsx       # 캘린더
+        │   ├── Document.jsx       # 문서 탭 (템플릿 편집·HWPX/DOCX/PDF 내보내기)
+        │   ├── DocumentTemplates.js # 문서 템플릿 정의
         │   └── Settings.jsx       # 설정
         └── components/
             ├── SkillPanel.jsx     # AI·NotebookLM 스킬 출력 패널
@@ -193,6 +222,7 @@ tidy/
 - **AI** — Claude claude-sonnet-4-5 (Anthropic)
 - **DB** — better-sqlite3
 - **파일 파싱** — pdf-parse, mammoth, hwp.js
+- **문서 내보내기** — html-to-docx, JSZip, bundled HWPX writer/JRE
 - **NotebookLM** — notebooklm-py (Python, 선택)
 - **메신저** — imapflow (Gmail), @slack/web-api, bplist-parser (알림)
 
