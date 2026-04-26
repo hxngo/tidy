@@ -6,6 +6,8 @@ const { shell, Notification, dialog, app } = require('electron')
 const store = require('./store')
 const vault = require('./core/vault')
 const { analyzeMessage, analyzeImageFile, processNlTaskAction, generateReplyDraft, generateWeeklyReport } = require('./core/ai')
+const { getLLMClient, hasAuth, isCliMode } = require('./core/llm')
+const { checkCli: checkClaudeCli } = require('./core/claude-cli')
 const { fetchUnseenEmails, testConnection: testImapConnection } = require('./core/imap')
 const { fetchNewMessages, testConnection: testSlackConnection } = require('./core/slack')
 const { extractText, inferSource, isImageFile } = require('./core/parser')
@@ -926,10 +928,8 @@ function setupIpcHandlers(ipcMain, getWindow) {
   // answeredCount: 지금까지 답변 완료된 질문 수
   ipcMain.handle('profile:next-question', async (_event, { history = [], answeredCount = 0 }) => {
     try {
-      const Anthropic = require('@anthropic-ai/sdk')
-      const apiKey = store.get('anthropicKey')
-      if (!apiKey) return { error: 'API 키 없음' }
-      const client = new Anthropic({ apiKey })
+      if (!hasAuth()) return { error: 'Claude 인증 없음' }
+      const client = getLLMClient()
 
       const SYSTEM = `당신은 기업용 AI 에이전트의 온보딩 도우미입니다.
 새 사용자가 에이전트를 처음 사용할 때 그 사람의 업무 맥락을 최대한 깊이 파악해야 합니다.
@@ -971,10 +971,8 @@ function setupIpcHandlers(ipcMain, getWindow) {
   // Cold Start 분석: 수집된 대화 히스토리 → 구조화된 프로필 생성
   ipcMain.handle('profile:analyze', async (_event, { history = [] }) => {
     try {
-      const Anthropic = require('@anthropic-ai/sdk')
-      const apiKey = store.get('anthropicKey')
-      if (!apiKey) return { error: 'API 키 없음' }
-      const client = new Anthropic({ apiKey })
+      if (!hasAuth()) return { error: 'Claude 인증 없음' }
+      const client = getLLMClient()
 
       const conversation = history
         .map(m => `${m.role === 'assistant' ? 'AI' : '사용자'}: ${m.content}`)
@@ -1002,9 +1000,7 @@ function setupIpcHandlers(ipcMain, getWindow) {
   // 파일/폴더 분석 → 프로필 초안 생성 (Cold Start)
   ipcMain.handle('profile:scan-files', async (_event, { filePaths = [] }) => {
     try {
-      const Anthropic = require('@anthropic-ai/sdk')
-      const apiKey = store.get('anthropicKey')
-      if (!apiKey) return { error: 'API 키 없음' }
+      if (!hasAuth()) return { error: 'Claude 인증 없음' }
 
       const fileContents = []
       for (const fp of filePaths.slice(0, 10)) {
@@ -1029,7 +1025,7 @@ function setupIpcHandlers(ipcMain, getWindow) {
       if (fileContents.length === 0) return { error: '읽을 수 있는 파일이 없습니다' }
 
       const combined = fileContents.join('\n\n---\n\n').slice(0, 200000)
-      const client = new Anthropic({ apiKey })
+      const client = getLLMClient()
 
       const response = await client.messages.create({
         model: 'claude-sonnet-4-6',
@@ -1058,11 +1054,9 @@ function setupIpcHandlers(ipcMain, getWindow) {
   // 검증된 프로필로 지식 베이스 재합성 (원본 대화 폐기 후 호출)
   ipcMain.handle('profile:synthesize', async (_event, profile) => {
     try {
-      const Anthropic = require('@anthropic-ai/sdk')
-      const apiKey = store.get('anthropicKey')
-      if (!apiKey) return { error: 'API 키 없음' }
+      if (!hasAuth()) return { error: 'Claude 인증 없음' }
 
-      const client = new Anthropic({ apiKey })
+      const client = getLLMClient()
       const profileText = JSON.stringify(profile, null, 2)
 
       const response = await client.messages.create({
@@ -1154,10 +1148,8 @@ function setupIpcHandlers(ipcMain, getWindow) {
   // 자연어 → 스킬 자동 생성
   ipcMain.handle('skill:generate', async (_event, { description, existingSkill = null }) => {
     try {
-      const Anthropic = require('@anthropic-ai/sdk')
-      const apiKey = store.get('anthropicKey')
-      if (!apiKey) return { error: 'API 키 없음' }
-      const client = new Anthropic({ apiKey })
+      if (!hasAuth()) return { error: 'Claude 인증 없음' }
+      const client = getLLMClient()
 
       const action = existingSkill ? '수정' : '생성'
       const baseInfo = existingSkill
@@ -1335,6 +1327,9 @@ function setupIpcHandlers(ipcMain, getWindow) {
       return {
         anthropicKey: store.get('anthropicKey') ? '●●●●●●●●' : '',
         hasAnthropicKey: !!store.get('anthropicKey'),
+        useClaudeCli: !!store.get('useClaudeCli'),
+        claudeCliPath: store.get('claudeCliPath') || '',
+        hasAuth: hasAuth(),
         gmailEmail: store.get('gmailEmail') || '',
         hasGmailPassword: !!store.get('gmailAppPassword'),
         hasSlackToken: !!store.get('slackToken'),
@@ -1373,6 +1368,12 @@ function setupIpcHandlers(ipcMain, getWindow) {
     try {
       if (params.anthropicKey && params.anthropicKey !== '●●●●●●●●') {
         store.set('anthropicKey', params.anthropicKey)
+      }
+      if (params.useClaudeCli !== undefined) {
+        store.set('useClaudeCli', !!params.useClaudeCli)
+      }
+      if (params.claudeCliPath !== undefined) {
+        store.set('claudeCliPath', params.claudeCliPath)
       }
       if (params.gmailEmail !== undefined) {
         store.set('gmailEmail', params.gmailEmail)
@@ -1445,6 +1446,22 @@ function setupIpcHandlers(ipcMain, getWindow) {
     } catch {}
   })
 
+  // ─── Claude CLI 점검 ──────────────────────────────────────
+  ipcMain.handle('ai:check-cli', async (_event, { path: cliPath } = {}) => {
+    try {
+      if (cliPath !== undefined) {
+        const prev = store.get('claudeCliPath')
+        store.set('claudeCliPath', cliPath || '')
+        const res = await checkClaudeCli()
+        if (!res.ok) store.set('claudeCliPath', prev || '')
+        return res
+      }
+      return await checkClaudeCli()
+    } catch (e) {
+      return { ok: false, error: e.message }
+    }
+  })
+
   // ─── 설정 내보내기/가져오기 ──────────────────────────────
   ipcMain.handle('settings:export', async () => {
     try {
@@ -1452,6 +1469,8 @@ function setupIpcHandlers(ipcMain, getWindow) {
         success: true,
         data: {
           anthropicKey:        store.get('anthropicKey') || '',
+          useClaudeCli:        !!store.get('useClaudeCli'),
+          claudeCliPath:       store.get('claudeCliPath') || '',
           gmailEmail:          store.get('gmailEmail') || '',
           gmailAppPassword:    store.get('gmailAppPassword') || '',
           slackToken:          store.get('slackToken') || '',
@@ -1476,7 +1495,8 @@ function setupIpcHandlers(ipcMain, getWindow) {
   ipcMain.handle('settings:import', async (_event, data) => {
     try {
       const keys = [
-        'anthropicKey', 'gmailEmail', 'gmailAppPassword', 'slackToken',
+        'anthropicKey', 'useClaudeCli', 'claudeCliPath',
+        'gmailEmail', 'gmailAppPassword', 'slackToken',
         'slackChannels', 'vaultPath', 'calendarEnabled', 'calendarName',
         'notificationSources', 'scanPaths', 'watchFolderPath',
         'blockedBundles', 'gdriveClientId', 'gdriveClientSecret',
@@ -2606,10 +2626,8 @@ ${kbHint}
 ${text.slice(0, 8000)}`
 
     try {
-      const apiKey = store.get('anthropicKey')
-      if (!apiKey) throw new Error('Claude API 키가 설정되지 않았습니다')
-      const Anthropic = require('@anthropic-ai/sdk')
-      const client = new Anthropic({ apiKey })
+      if (!hasAuth()) throw new Error('Claude 인증이 설정되지 않았습니다 (Settings > AI)')
+      const client = getLLMClient()
       const response = await client.messages.create({
         model: 'claude-sonnet-4-6',
         max_tokens: 8192,
@@ -2634,10 +2652,8 @@ ${text.slice(0, 8000)}`
     html, selectedHtml, selectedText, instruction, documentIr, kbContext,
   }) => {
     try {
-      const apiKey = store.get('anthropicKey')
-      if (!apiKey) throw new Error('Claude API 키가 설정되지 않았습니다')
-      const Anthropic = require('@anthropic-ai/sdk')
-      const client = new Anthropic({ apiKey })
+      if (!hasAuth()) throw new Error('Claude 인증이 설정되지 않았습니다 (Settings > AI)')
+      const client = getLLMClient()
       const hasSelection = !!String(selectedText || selectedHtml || '').trim()
       const knowledgeContext = buildDocumentKnowledgeContext(kbContext)
       const system = `당신은 HTML 기반 문서 자동화 편집 엔진입니다.

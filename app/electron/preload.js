@@ -53,6 +53,11 @@ contextBridge.exposeInMainWorld('tidy', {
     import: (data) => ipcRenderer.invoke('settings:import', data),
   },
 
+  // AI (Claude CLI 점검)
+  ai: {
+    checkCli: (params) => ipcRenderer.invoke('ai:check-cli', params || {}),
+  },
+
   badge: {
     set: (count) => ipcRenderer.invoke('badge:set', count),
   },

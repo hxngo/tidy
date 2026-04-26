@@ -6,6 +6,10 @@ const store = new Store({
   encryptionKey: 'tidy-secure-storage-v1',
   schema: {
     anthropicKey: { type: 'string', default: '' },
+    // API 키 대신 로컬 Claude Code CLI를 spawn 하여 사용
+    useClaudeCli: { type: 'boolean', default: false },
+    // CLI 실행 경로 (비어 있으면 PATH에서 'claude' 탐색)
+    claudeCliPath: { type: 'string', default: '' },
     gmailEmail: { type: 'string', default: '' },
     gmailAppPassword: { type: 'string', default: '' },
     slackToken: { type: 'string', default: '' },

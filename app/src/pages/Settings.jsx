@@ -39,6 +39,9 @@ export default function Settings({ embedded = false }) {
 
   const [settings, setSettings] = useState({
     hasAnthropicKey: false,
+    useClaudeCli: false,
+    claudeCliPath: '',
+    hasAuth: false,
     gmailEmail: '',
     hasGmailPassword: false,
     hasSlackToken: false,
@@ -50,6 +53,9 @@ export default function Settings({ embedded = false }) {
   })
 
   const [anthropicKey, setAnthropicKey] = useState('')
+  const [claudeCliPath, setClaudeCliPath] = useState('')
+  const [cliCheckResult, setCliCheckResult] = useState(null) // null|{ok, version|error, cliPath}
+  const [cliChecking, setCliChecking] = useState(false)
   const [gmailEmail, setGmailEmail] = useState('')
   const [gmailPassword, setGmailPassword] = useState('')
   const [slackToken, setSlackToken] = useState('')
@@ -123,6 +129,7 @@ export default function Settings({ embedded = false }) {
         const data = await window.tidy?.settings.get()
         if (data) {
           setSettings(data)
+          setClaudeCliPath(data.claudeCliPath || '')
           setGmailEmail(data.gmailEmail || '')
           setCalendarName(data.calendarName || '')
           setScanPaths(data.scanPaths || [])
@@ -409,35 +416,107 @@ export default function Settings({ embedded = false }) {
 
           {/* ── AI 탭 ── */}
           {tab === 'ai' && (
-            <div>
-              <div className="flex items-center justify-between gap-3 mb-3">
+            <div className="space-y-6">
+              <div className="flex items-center justify-between gap-3">
                 <div className="flex-1 min-w-0">
                   <h2 className="text-sm font-semibold text-[#e5e5e5]">Claude AI</h2>
                   <p className="text-xs text-[#737373] mt-0.5">메시지 분류·요약·태스크 추출에 사용됩니다</p>
                 </div>
-                {settings.hasAnthropicKey && (
-                  <span className="text-xs text-green-400 bg-green-900/20 px-2 py-1 rounded-full border border-green-700/30 flex-shrink-0">✓ 연결됨</span>
+                {settings.hasAuth && (
+                  <span className="text-xs text-green-400 bg-green-900/20 px-2 py-1 rounded-full border border-green-700/30 flex-shrink-0">
+                    ✓ {settings.useClaudeCli ? 'CLI 사용 중' : 'API 키 연결됨'}
+                  </span>
                 )}
               </div>
-              <form onSubmit={handleSaveApiKey} className="space-y-3">
-                <div>
-                  <input
-                    type="password"
-                    value={anthropicKey}
-                    onChange={(e) => setAnthropicKey(e.target.value)}
-                    placeholder={settings.hasAnthropicKey ? '새 API 키로 교체하려면 입력' : 'sk-ant-...'}
-                    className={inputCls}
+
+              {/* CLI 모드 토글 */}
+              <div className="rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] p-4 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-[#e5e5e5]">Claude Code CLI 사용</p>
+                    <p className="text-xs text-[#737373] mt-1">
+                      API 키 대신 로컬에 설치된 <code className="text-[#9a9cb8]">claude</code> CLI를 spawn 합니다.
+                      이미 Claude Code로 로그인돼 있어야 합니다.
+                    </p>
+                  </div>
+                  <Toggle
+                    value={!!settings.useClaudeCli}
+                    onChange={async () => {
+                      const next = !settings.useClaudeCli
+                      const result = await window.tidy?.settings.save({ useClaudeCli: next })
+                      if (result?.success) {
+                        setSettings(prev => ({ ...prev, useClaudeCli: next, hasAuth: next || prev.hasAnthropicKey }))
+                        showFeedback('success', next ? 'Claude CLI 모드 활성화' : 'API 키 모드로 전환')
+                      }
+                    }}
                   />
-                  <p className="text-xs text-[#404040] mt-1">console.anthropic.com에서 발급</p>
                 </div>
-                <button
-                  type="submit"
-                  disabled={!anthropicKey.trim() || saving}
-                  className="px-4 py-2 bg-[#d4d4d8] text-[#111111] text-sm rounded-lg hover:bg-[#b8b8c0] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                >
-                  {saving ? '저장 중...' : '저장'}
-                </button>
-              </form>
+
+                {settings.useClaudeCli && (
+                  <div className="space-y-2 pt-2 border-t border-[#2a2a2a]">
+                    <label className="text-xs text-[#9a9cb8]">CLI 경로 (비워두면 PATH에서 자동 탐색)</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={claudeCliPath}
+                        onChange={(e) => setClaudeCliPath(e.target.value)}
+                        placeholder="/usr/local/bin/claude (선택)"
+                        className={inputCls + ' flex-1'}
+                      />
+                      <button
+                        type="button"
+                        disabled={cliChecking}
+                        onClick={async () => {
+                          setCliChecking(true)
+                          setCliCheckResult(null)
+                          try {
+                            const res = await window.tidy?.ai.checkCli({ path: claudeCliPath })
+                            setCliCheckResult(res)
+                            if (res?.ok) showFeedback('success', `CLI 확인됨: ${res.version}`)
+                            else showFeedback('error', `CLI 확인 실패: ${res?.error || '오류'}`)
+                          } finally {
+                            setCliChecking(false)
+                          }
+                        }}
+                        className="px-3 py-2 text-xs rounded-lg border border-[#2a2a2a] hover:border-[#3a3a3a] text-[#e5e5e5] disabled:opacity-50"
+                      >
+                        {cliChecking ? '확인 중...' : '연결 확인'}
+                      </button>
+                    </div>
+                    {cliCheckResult && (
+                      <p className={`text-xs ${cliCheckResult.ok ? 'text-green-400' : 'text-red-400'}`}>
+                        {cliCheckResult.ok
+                          ? `✓ ${cliCheckResult.version} (${cliCheckResult.cliPath})`
+                          : `✗ ${cliCheckResult.error}`}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* API 키 입력 (CLI 모드 아닐 때만) */}
+              {!settings.useClaudeCli && (
+                <form onSubmit={handleSaveApiKey} className="space-y-3">
+                  <div>
+                    <label className="text-xs text-[#9a9cb8] mb-1 block">Anthropic API 키</label>
+                    <input
+                      type="password"
+                      value={anthropicKey}
+                      onChange={(e) => setAnthropicKey(e.target.value)}
+                      placeholder={settings.hasAnthropicKey ? '새 API 키로 교체하려면 입력' : 'sk-ant-...'}
+                      className={inputCls}
+                    />
+                    <p className="text-xs text-[#404040] mt-1">console.anthropic.com에서 발급</p>
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={!anthropicKey.trim() || saving}
+                    className="px-4 py-2 bg-[#d4d4d8] text-[#111111] text-sm rounded-lg hover:bg-[#b8b8c0] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {saving ? '저장 중...' : '저장'}
+                  </button>
+                </form>
+              )}
             </div>
           )}
 

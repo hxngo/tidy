@@ -1,7 +1,7 @@
-const Anthropic = require('@anthropic-ai/sdk')
 const fs = require('fs')
 const path = require('path')
 const store = require('../store')
+const { getLLMClient } = require('./llm')
 
 // 모델: 단순 스킬 → Haiku, 복잡 문서 작성 → Sonnet
 const MODEL_LIGHT = 'claude-haiku-4-5-20251001'
@@ -16,9 +16,7 @@ const IMAGE_MIME = {
 }
 
 function getClient() {
-  const apiKey = store.get('anthropicKey')
-  if (!apiKey) throw new Error('Claude API 키가 설정되지 않았습니다')
-  return new Anthropic({ apiKey })
+  return getLLMClient()
 }
 
 function readImageAsBase64(filePath) {
